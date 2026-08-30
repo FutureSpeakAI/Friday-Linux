@@ -104,8 +104,17 @@ jobs:
             --type raw \
             --rootfs xfs \
             "${{ github.event.inputs.image_ref }}"
-          ls -la output/
-          sudo chmod 666 output/*.raw
+          find output -type f
+          # CI run 33339485078's real failure: bootc-image-builder actually
+          # succeeded ("Build complete!") but this step still failed,
+          # because the raw file lands at output/image/disk.raw (a
+          # subdirectory), not directly under output/ — the plain glob
+          # `output/*.raw` matched nothing, and `chmod` on a literal,
+          # non-existent "output/*.raw" exits nonzero under `bash -e`,
+          # failing the whole step despite the real work having succeeded.
+          # `find` (already used correctly in the next step) is recursive;
+          # this chmod now matches it.
+          sudo find output -name '*.raw' -exec chmod 666 {} \;
 
       - name: Grow the disk so the lockbox has real free space to claim
         # SPEC.md §5/ADR-004: the lockbox is created at first boot on
