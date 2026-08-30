@@ -554,4 +554,25 @@ Signature verification of the promoted digest; `nft list ruleset` matches the co
 
 ---
 
-*End of specification v0.1.*
+## Amendment A1 (30 Aug 2026): decouple M0 from upstream PRs
+
+- `build/agent-friday.pin` points at the `v5.7.0` tag. Recorded as Deviation D-A1.
+- Until PR-3 lands, the Containerfile clones Agent-Friday at the pin, installs it
+  editable into `/usr/lib/friday/venv`, and copies `data/` and `skills/` to
+  `/usr/share/friday/seed/`; `friday-firstboot` copies the seed into `FRIDAY_HOME` when
+  absent. Deployment step, not a patch; removed when PR-3 lands.
+- Until PR-2 lands, `os.env` keeps `FRIDAY_OS_MODE=1` (inert) and `secrets.env` supplies
+  `FRIDAY_PASSWORD`. The model's tool registry may still list computer-control tools
+  until PR-2; accepted for M0 and M1, recorded in `docs/VERIFY.md`.
+- M0 acceptance: `/api/health` returns HTTP 200 within 300 s. The `boot_critical_ok`
+  contract (PR-6) moves to M2; greenboot `30-health.sh` checks status code only until then.
+- PR-1 is not an M0 blocker; it remains required before M4.
+- Build and boot environment: WSL2 Ubuntu with rootful podman, bootc-image-builder,
+  and QEMU with KVM via nested virtualization, or GitHub Actions `ubuntu-latest` once a
+  remote exists. The Windows host is not a build environment.
+- Q4 and Q5 are resolved by the executor with `skopeo inspect` against ghcr.io before any
+  build; results go to `docs/VERIFY.md`, the digest into the Containerfile.
+
+---
+
+*End of specification v0.1, as amended by A1.*

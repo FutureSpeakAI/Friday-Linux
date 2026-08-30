@@ -180,3 +180,84 @@ is scaffolded.
 - Exact wording Stephen wants in `docs/TRADEMARKS.md` pending his own read
   of the Fedora remix guidelines (§17 Q6) — default text noted in
   MILESTONES.md but not drafted here.
+
+## 2026-08-30 — Step B1 (WSL2 build environment): DEFERRED, collision risk detected
+
+Dispatched to set up a WSL2 Ubuntu environment (podman rootful + skopeo +
+qemu-system-x86 + ovmf + bootc-image-builder pull + KVM/loop-device checks)
+per Step B1. Executed the required pre-flight re-verification before touching
+anything, per the dispatch's collision-hazard warning about the concurrent
+`Friday-Models` (Gemma fine-tuning) mission also planning WSL2 + `.wslconfig`
+for CUDA training.
+
+**Prior `.wslconfig`:** did not exist at `%USERPROFILE%\.wslconfig` (`cat`
+returned "No such file or directory"). No change was made to it — see below.
+
+**Running-distro check (fresh, at time of check):**
+```
+wsl --list --running
+> There are no running distributions.
+
+wsl --list --verbose
+  NAME                   STATE     VERSION
+* docker-desktop         Stopped   2
+  Ubuntu-24.04            Stopped   2
+```
+Nothing is currently running. However, this itself is new information: the
+orchestrating session's "moments ago" pre-check reported `wsl --list
+--verbose` showing **only** `docker-desktop`, with **no Ubuntu distro
+registered at all**. My fresh check shows `Ubuntu-24.04` now registered
+(Stopped). That distro was not there moments ago and is there now.
+
+**Decisive evidence of concurrent active work:** checking
+`C:\Users\swebs\Projects\Friday-Models` for signs of an active job (per the
+dispatch's heuristic) found:
+- `git log -3`: HEAD is `9c489d3`, "M0: scaffold repo layout, copy spec
+  verbatim, record initial environment/GPU/WSL2 findings" — committed
+  2026-08-30 09:29:28, i.e. minutes before this check.
+- `git status`: one untracked path, `env/`.
+- `env/wslconfig.example` (untracked, so postdates that commit) has mtime
+  **09:35**, i.e. **about one minute before** this check was run (checked at
+  09:36). Its contents:
+  ```
+  [wsl2]
+  memory=26GB
+  swap=16GB
+  ```
+
+This is a live session actively iterating on WSL2/`.wslconfig` planning for
+Friday-Models *right now*, not a stale scaffold from hours ago. The newly
+appeared `Ubuntu-24.04` registration is consistent with that same concurrent
+session having already begun WSL2 setup on its own. Per the dispatch's
+explicit instruction ("if there's any other evidence of an active
+long-running job in WSL... DO NOT run `wsl --shutdown`"), this qualifies.
+
+**Decision: deferred.** Did not write/modify `.wslconfig`, did not run `wsl
+--shutdown`, did not touch the newly-registered `Ubuntu-24.04` distro, and
+did not install anything inside it. No WSL state was changed by this
+session. `Ubuntu-24.04`'s existing packages (if any) were not inspected
+beyond the `wsl --list --verbose` listing above, to avoid any interaction
+with a distro another session may currently be provisioning.
+
+**Fallback:** per the governing spec's Amendment A1, Step B2 (GitHub Actions
+`ubuntu-latest` runners) should be used for the build-and-boot steps instead
+of a local WSL2 podman+QEMU/KVM environment, until this collision risk with
+Friday-Models' concurrent WSL2 use clears (i.e. until that session's
+`.wslconfig`/distro work is confirmed finished and no job is live inside
+WSL2).
+
+**Recommended next step for Stephen:** re-run Step B1 once Friday-Models'
+WSL2 work is confirmed idle (no running distro, no fresh commits/file
+activity in that repo's `env/`, `train/`, `logs/`, `artifacts/` in the last
+few hours). At that point the `.wslconfig` block this task would have
+written is still just:
+```
+[wsl2]
+nestedVirtualization=true
+memory=26GB
+```
+merged non-destructively with whatever Friday-Models' own `.wslconfig` needs
+turn out to be (note its example file wants `swap=16GB` too, which B1 did
+not ask for — reconcile the two missions' `.wslconfig` requirements with
+Stephen before writing a shared file, since both are Windows-machine-global,
+not per-project).

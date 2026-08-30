@@ -253,6 +253,22 @@ silently made, for each place the spec's text couldn't be used verbatim.
   never run against a real cryptsetup/btrfs version is worse than one that
   states exactly what's missing.
 
+- **Deviation D-A1: M0 decoupled from upstream PR-1/2/3, per Amendment A1
+  (30 Aug 2026, appended to `SPEC.md`).** The "Blocking dependency" note above
+  (PR-1/2/3 not yet merged upstream) is real and was going to stall M0
+  indefinitely. Amendment A1 unblocks it: `build/agent-friday.pin` is set to
+  `v5.7.0` (not a hypothetical post-PR-3 tag); until PR-3 lands, the
+  Containerfile clones Agent-Friday at that pin and copies `data/`/`skills/`
+  to `/usr/share/friday/seed/` itself (a deployment-time workaround, not a
+  vendored patch — removed the moment PR-3 merges); until PR-2 lands,
+  `os.env`'s `FRIDAY_OS_MODE=1` is inert and `secrets.env` supplies
+  `FRIDAY_PASSWORD` directly, and the tool registry may still list
+  computer-control tools (accepted for M0/M1 only). M0's `boot_critical_ok`
+  gate is deferred to M2; `greenboot/required.d/30-health.sh` checks HTTP
+  status code only until PR-6 lands. This is why `build/agent-friday.pin` in
+  the M0 entry below is no longer "deliberately left unresolved" — A1 gives
+  it a real, if temporary, value.
+
 - **Executable bits are set in the Containerfile, not relied on from git.**
   Confirmed via `git ls-files -s` after committing: every file this repo
   tracks landed as mode `100644`, including the `.sh` scripts and the
