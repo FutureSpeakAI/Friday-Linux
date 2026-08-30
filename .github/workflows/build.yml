@@ -58,14 +58,23 @@ jobs:
             /opt/az /usr/lib/jvm || true
           echo "after:" && df -h /
 
+      # sudo matters here, not just habit: bootc-image-builder below runs as
+      # root (it needs loop-device access) and reads images from root's
+      # podman storage (/var/lib/containers/storage), which is a SEPARATE
+      # store from the unprivileged "runner" user's rootless storage. CI run
+      # 33322712869 built the image without sudo, then bootc-image-builder
+      # (correctly) reported "localhost/friday-linux:testing: image not
+      # known" because it was looking in root's store and the image only
+      # existed in the rootless one. Building as root from the start keeps
+      # both steps looking at the same storage.
       - name: podman build
-        run: podman build -t friday-linux:testing -f Containerfile .
+        run: sudo podman build -t friday-linux:testing -f Containerfile .
 
       - name: Discover bootc-image-builder CLI (docs/VERIFY.md disk.toml question)
         run: |
           mkdir -p output
           echo "--- bootc-image-builder --help ---"
-          podman run --rm quay.io/centos-bootc/bootc-image-builder:latest --help
+          sudo podman run --rm quay.io/centos-bootc/bootc-image-builder:latest --help
 
       - name: Produce raw image (bootc-image-builder)
         # UNVERIFIED (docs/VERIFY.md): build/disk.toml's exact partition-
@@ -87,7 +96,6 @@ jobs:
             -v /var/lib/containers/storage:/var/lib/containers/storage \
             quay.io/centos-bootc/bootc-image-builder:latest \
             --type raw \
-            --local \
             localhost/friday-linux:testing
           ls -la output/
 

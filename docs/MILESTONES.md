@@ -68,13 +68,44 @@ secret exists or should be created). The `bootc-image-builder` step (next
 checklist line) is still a deliberate `exit 1` placeholder and is this
 session's next target.
 
+**2026-08-30, continued: llama-server-vulkan now builds too, and
+bootc-image-builder is real (not the placeholder) but not yet producing a
+raw image.** CI run 33322712869:
+```
+6 podman build                                                    success
+7 Discover bootc-image-builder CLI (disk.toml question)            success
+8 Produce raw image (bootc-image-builder)                          failure
+```
+`podman build` now includes a real `llama-build` stage (static-linked
+`llama-server-vulkan`, `llama-quantize`, `llama-gguf-split`, verified with
+`ldd` inside `build/build-llama.sh` itself — see Deviation D-A5). Getting
+the multi-stage build green took three more real fixes: two missing Vulkan
+CMake dependencies (`spirv-headers-devel`, `glslang-devel`), the shared-
+library/static-link bug (D-A5), and a third disk-space exhaustion from
+`uv`'s cache being committed into its own layer plus GitHub's preinstalled
+toolchains eating the runner's disk budget (D-A6, includes a "Free disk
+space on the runner" step in `build.yml` that reclaims real, measured
+space). `bootc-image-builder --help` now runs for real in CI (its full
+output is in that run's log, not reproduced here — read it there rather
+than trusting a description). The raw-image step itself failed with a
+useful, specific error, not a guess: `localhost/friday-linux:testing: image
+not known` — `podman build` ran unprivileged (rootless storage) while
+`bootc-image-builder` runs under `sudo` (rootful storage, needed for
+loop-device access), so the two steps were looking at two different image
+stores. Fixed by building with `sudo podman build` too, so both steps share
+root's storage; also dropped the now-default (and warned-about) `--local`
+flag. Not yet re-run to confirm — this session's next check.
+
 **Acceptance checklist, updated:**
-- [x] `podman build` succeeds (image `c1a3e545cee4`, tagged
-      `localhost/friday-linux:testing`, CI run 33320159178). NOT YET: pushed
-      to GHCR and signed — deliberately deferred, see above.
-- [ ] `bootc-image-builder` raw image ≤ 8 GB compressed — **cannot run**:
-      same blocker, plus `docs/VERIFY.md`'s `disk.toml` schema question is
-      still open.
+- [x] `podman build` succeeds, now including a real `llama-server-vulkan`
+      build stage (CI run 33322712869). Image tag `localhost/friday-linux:
+      testing` (digest varies per rebuild — not yet pinned/pushed to GHCR).
+      NOT YET: pushed to GHCR and signed — deliberately deferred, see above.
+- [ ] `bootc-image-builder` raw image ≤ 8 GB compressed — in progress, real
+      invocation now exists (no more `exit 1` placeholder); a real rootless/
+      rootful podman-storage mismatch was just fixed and is this session's
+      next push to confirm. `docs/VERIFY.md`'s `disk.toml` schema question
+      remains open (deliberately deferred — default disk layout used).
 - [ ] QEMU/KVM boots it, `/api/health` 200 within 300 s — **cannot run**:
       no KVM in this sandbox; also nothing to serve `/api/health` yet
       (below).
