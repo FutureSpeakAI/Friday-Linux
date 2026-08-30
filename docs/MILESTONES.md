@@ -96,24 +96,80 @@ stores. Fixed by building with `sudo podman build` too, so both steps share
 root's storage; also dropped the now-default (and warned-about) `--local`
 flag. Not yet re-run to confirm — this session's next check.
 
+**2026-08-30, M0's `build` workflow is fully green for the first time.** CI
+run 33326572437, every step:
+```
+podman build                                                       success
+Push image to GHCR                                                 (added after this run — see below)
+Copy built image into root's podman storage                        success
+Discover bootc-image-builder CLI (disk.toml question)               success
+Produce raw image (bootc-image-builder)                             success
+Size check (G7)                                                     success
+  compressed size: 1719 MiB (budget: 8192 MiB, SPEC.md G7)
+Sign with cosign (keyless, GitHub OIDC)                              (was exit-1 placeholder; now a clean skip)
+```
+Two more real fixes got here from the previous entry's rootless/rootful
+storage mismatch:
+1. **`sudo podman build` was the wrong fix.** Re-running the whole build
+   under `sudo` (to share root's podman storage with `bootc-image-builder`)
+   traded the storage mismatch for a *different*, sudo-environment-specific
+   failure (CI run 33323791375: `dnf`'s `$releasever` failed to expand,
+   "database disk image is malformed", on a `dnf install` line that works
+   fine rootless) and cost a full ~20-minute rebuild to discover. Fixed
+   properly (Deviation D-A7): build once, rootless (proven reliable), then
+   `podman save -o /tmp/friday-linux.tar ...` + `sudo podman load -i
+   /tmp/friday-linux.tar` — a tar round-trip, not a second build.
+2. **`bootc-image-builder`'s manifest step needed `--rootfs xfs`.** First
+   real attempt (CI run 33325393238) reached genuine manifest generation and
+   failed with `missing required info: DefaultRootFs`. `--rootfs xfs` (a
+   best-effort guess, Fedora's traditional default, flagged UNVERIFIED in
+   `docs/VERIFY.md` when tried) turned out to be correct — CI run
+   33326572437's log shows real partitioning and an actual ostree deploy:
+   `/dev/loop0p2` (EFI), `/dev/loop0p3` (boot), `/dev/loop0p4` (xfs root),
+   `Deployment root at 'ostree/deploy/default/deploy/
+   108dd3da32004bbb9a5ae2b8da3160f60cf9876f912ad063d2487abb6cd345e7.0'`,
+   `disk.raw` size `11168382976` bytes (~10.4 GiB uncompressed), compressing
+   to 1719 MiB — a real disk image, not a stub.
+
+Added after this run, not yet re-confirmed in a fresh CI run: a "Push image
+to GHCR" step (uses the auto-issued `GITHUB_TOKEN` via a job-level
+`permissions: packages: write`, no secret created) and converting the
+cosign step from a failing placeholder into an explicit, clearly-labeled
+skip — signing stays out of scope for M0 per the executor's operating
+instructions, but a deliberately-deferred step should not make the whole
+`build` job report failure once everything ahead of it is real and green.
+
+**`build/disk.toml` is still not written** — SPEC.md §5's exact partition
+layout (16 GiB fixed root, remainder free for the lockbox) is not what got
+built; `--rootfs xfs` plus bootc-image-builder's own defaults produced
+*some* working partition table, which is enough to satisfy M0's literal
+"produces a raw image ≤ 8 GB compressed" line but is a real, tracked gap
+before M1 (the wizard needs specific free space to exist for the lockbox).
+Not silently treated as done.
+
 **Acceptance checklist, updated:**
-- [x] `podman build` succeeds, now including a real `llama-server-vulkan`
-      build stage (CI run 33322712869). Image tag `localhost/friday-linux:
-      testing` (digest varies per rebuild — not yet pinned/pushed to GHCR).
-      NOT YET: pushed to GHCR and signed — deliberately deferred, see above.
-- [ ] `bootc-image-builder` raw image ≤ 8 GB compressed — in progress, real
-      invocation now exists (no more `exit 1` placeholder); a real rootless/
-      rootful podman-storage mismatch was just fixed and is this session's
-      next push to confirm. `docs/VERIFY.md`'s `disk.toml` schema question
-      remains open (deliberately deferred — default disk layout used).
-- [ ] QEMU/KVM boots it, `/api/health` 200 within 300 s — **cannot run**:
-      no KVM in this sandbox; also nothing to serve `/api/health` yet
-      (below).
-- [ ] `bootc status` one deployment, `/usr` read-only — **cannot run**.
+- [x] `podman build` succeeds, including the real `llama-server-vulkan`
+      build stage (CI run 33326572437). Image tag `localhost/friday-linux:
+      testing`. GHCR push step added same session, not yet reconfirmed by a
+      fresh run. Signing remains a deliberate, clearly-labeled skip (SPEC.md
+      §10.3, out of scope for M0 per the executor's operating instructions).
+- [x] `bootc-image-builder` produces a raw image ≤ 8 GB compressed — CI run
+      33326572437, real command output: `compressed size: 1719 MiB (budget:
+      8192 MiB, SPEC.md G7)`. Uses bootc-image-builder's default disk
+      layout plus `--rootfs xfs`, NOT a verified `build/disk.toml` — SPEC.md
+      §5's exact partition scheme remains a real, tracked gap for M1.
+- [ ] QEMU/KVM boots it, `/api/health` 200 within 300 s — **cannot run from
+      this session**: no KVM in this sandbox, and `boot-test.yml` is a
+      separate workflow with its own unresolved, lower-priority CI quirk
+      (docs/VERIFY.md) — out of this session's scope per its own mandate.
+- [ ] `bootc status` one deployment, `/usr` read-only — needs a real boot
+      (QEMU or hardware), not exercised by `build.yml`.
 - [ ] Lockbox is LUKS2/Argon2id with five subvolumes — **cannot run**;
       also the wizard stub deliberately raises `NotImplementedError` for
       this step rather than shipping unverified `cryptsetup` syntax (see
-      `docs/DECISIONS.md` Deviations).
+      `docs/DECISIONS.md` Deviations), and `build/disk.toml`'s gap above
+      means the free space for the lockbox to claim isn't guaranteed to
+      exist yet either.
 
 **Superseded (kept struck through for the record, not deleted, per §18 rule
 7's "record, don't silently overwrite"): the three blockers listed in the
