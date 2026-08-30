@@ -112,7 +112,9 @@ RUN AGENT_FRIDAY_TAG="$(grep -v '^#' /tmp/agent-friday.pin | head -1)" && \
         https://github.com/FutureSpeakAI/Agent-Friday.git /usr/lib/friday/src && \
     HOME=/tmp UV_CACHE_DIR=/tmp/uv-cache uv venv /usr/lib/friday/venv && \
     HOME=/tmp UV_CACHE_DIR=/tmp/uv-cache uv pip install --python /usr/lib/friday/venv/bin/python \
-        -e "/usr/lib/friday/src[voice-local-lite,compression,federation,google,compose,provenance]" && \
+        -e "/usr/lib/friday/src[voice-local-lite,federation,google,compose,provenance]" && \
+    HOME=/tmp UV_CACHE_DIR=/tmp/uv-cache uv pip install --python /usr/lib/friday/venv/bin/python \
+        "headroom-ai>=0.22" && \
     mkdir -p /usr/share/friday/seed && \
     cp -r /usr/lib/friday/src/data   /usr/share/friday/seed/data && \
     cp -r /usr/lib/friday/src/skills /usr/share/friday/seed/skills
@@ -122,22 +124,36 @@ RUN AGENT_FRIDAY_TAG="$(grep -v '^#' /tmp/agent-friday.pin | head -1)" && \
 #
 # Deviation D-A3 (see docs/DECISIONS.md): §6's given extras list is
 # "[voice-local-lite,local,compression,federation,google,compose,provenance]"
-# — this Containerfile installs everything in that list EXCEPT `local`.
-# `local` = ["sentence-transformers>=2.2", "chromadb>=0.5"] per
-# Agent-Friday's pyproject.toml at v5.7.0, and sentence-transformers hard-
-# depends on torch + transformers. CI run 33319580279 resolved
-# torch==2.13.0 plus a full CUDA wheel stack (nvidia-cublas, nvidia-cudnn,
-# triton, etc.) the instant `local` was in the extras list, then ran the
-# GitHub runner out of disk space trying to write them. §0 rule 7 prohibits
-# "adding torch to the image" unconditionally, regardless of convenience,
-# and §1.1 states plainly that local voice is CTranslate2/ONNX and the
-# packaged product does not ship torch — so this is not a resource problem
-# to work around, it is the DECIDED rule already telling us the right
-# answer. `local`'s on-device embeddings/memory capability is therefore
-# NOT in the M0 image; re-adding it needs either a torch-free embedding
-# path (e.g. an ONNX sentence-embedding model, consistent with the ONNX
-# path already used for voice) or a decision from Stephen to relax rule 7,
-# neither of which is this executor's call to make unilaterally.
+# — this Containerfile installs neither `local` nor Agent-Friday's
+# `compression` extra as such; both silently pull `torch`, which §0 rule 7
+# prohibits unconditionally. `local` = ["sentence-transformers>=2.2",
+# "chromadb>=0.5"] (torch is sentence-transformers' own hard dependency).
+# `compression` = ["headroom-ai[all]>=0.22"], and headroom-ai's `[all]` extra
+# expands to `[code,evals,html,image,mcp,memory,ml,otel,proxy,relevance,
+# reports,spreadsheet,voice]` — its `ml`, `voice` and `memory` extras each
+# carry a `sys_platform != "darwin"` marker that is true on Linux regardless
+# of CPU architecture, so `headroom-ai[all]` pulls torch + transformers +
+# sentence-transformers on every Linux build, not just non-x86_64 ones. CI
+# run 33319881454 confirmed torch/sentence-transformers/CUDA packages were
+# STILL resolved after `local` alone was dropped, tracing to this second,
+# independent source. Read `context_compressor.py` at the pinned tag
+# (`from headroom import compress`, base-package call, degrades to
+# passthrough on ImportError) to confirm the feature Agent-Friday actually
+# uses needs none of headroom-ai's extras — so the fix installs bare
+# `headroom-ai` (no extras: just tiktoken, pydantic, litellm, click, rich,
+# opentelemetry-api, ast-grep-cli, pyyaml, tomlkit — no torch anywhere in
+# that list) as a second, separate `uv pip install`, instead of routing
+# through Agent-Friday's `compression` extra name at all. This is a choice
+# about which OS-image dependency set Friday-Linux's own Containerfile
+# installs, not a patch to Agent-Friday's code, so it doesn't need an
+# upstream PR (§18 rule 6 is about vendoring source patches). Consequence:
+# code/HTML/image-aware compression modes and headroom's proxy/agent-
+# framework integrations are unavailable; the base JSON/text/prose
+# compression `context_compressor.py` actually calls is unaffected.
+# `local`'s on-device embeddings/memory capability remains genuinely absent
+# from the M0 image — re-adding it needs either a torch-free embedding path
+# (consistent with the ONNX choice already made for voice) or a decision
+# from Stephen to relax rule 7, neither of which is this executor's call.
 #
 # UNVERIFIED: this repo does not commit a lockfile compatible with the A1
 # workaround (build/agent-friday.lock does not exist yet — it was written

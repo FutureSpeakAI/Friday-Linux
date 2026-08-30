@@ -222,6 +222,40 @@ figure below was re-checked with `git show v5.7.0:<path>` against the real
   explicit decision from Stephen to relax rule 7 — not something this
   executor can decide unilaterally either way. Flagged for M1+ planning.
 
+- **Deviation D-A4: replaced Agent-Friday's `compression` extra
+  (`headroom-ai[all]`) with a bare `headroom-ai` install, no extras.**
+  Immediately after D-A3 (dropping `local`), CI run 33319881454 still
+  resolved `torch==2.13.0`, `sentence-transformers==5.7.0` and the full CUDA
+  wheel stack and ran out of disk again — proving `local` was not the only
+  source. Checked headroom-ai's PyPI metadata directly (`curl
+  https://pypi.org/pypi/headroom-ai/json`): `compression = ["headroom-ai
+  [all]>=0.22"]` in Agent-Friday's `pyproject.toml` expands `[all]` to
+  `[code,evals,html,image,mcp,memory,ml,otel,proxy,relevance,reports,
+  spreadsheet,voice]`, and the `ml`, `voice`, and `memory` extras each carry
+  a marker like `(platform_machine != "x86_64" and extra == "ml") or
+  (sys_platform != "darwin" and extra == "ml")` — on Linux, `sys_platform !=
+  "darwin"` is unconditionally true, so the OR makes the whole marker true
+  regardless of `platform_machine`, meaning `headroom-ai[all]` pulls
+  `torch`, `transformers`, and `sentence-transformers` on every Linux
+  install, x86_64 included, not just the non-x86_64/non-macOS case the
+  marker was presumably written for. Read `context_compressor.py` at v5.7.0
+  to check what Agent-Friday actually calls: `from headroom import
+  compress`, a base-package import with a documented graceful fallback to
+  uncompressed messages on `ImportError` — none of `code`/`html`/`image`/
+  `memory`/`ml`/`voice`/`proxy` is load-bearing for that call. Fix: install
+  bare `headroom-ai>=0.22` (its own base dependencies are `tiktoken`,
+  `pydantic`, `litellm`, `click`, `rich`, `opentelemetry-api`,
+  `ast-grep-cli`, `pyyaml`, `tomlkit` — no torch) as a second `uv pip
+  install`, separate from the `-e .[...]` editable install of Agent-Friday
+  itself, and drop `compression` from that editable install's extras list.
+  This is Friday-Linux choosing what to install into its own venv, not a
+  patch to Agent-Friday's source, so it does not need an upstream PR (rule 6
+  is about not vendoring source patches to avoid the PR process — this is
+  neither). Consequence: headroom's code-aware, HTML-aware, and image-aware
+  compression modes, plus its unrelated proxy/agent-framework integrations,
+  are unavailable in the M0 image; the JSON/text/prose compression path
+  `context_compressor.py` actually exercises is unaffected.
+
 ## Blocking dependency: PR-1/2/3 not yet merged upstream
 
 §13's last paragraph is explicit: "Friday Linux M0 (Section 15) can start on
