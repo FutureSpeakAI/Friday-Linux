@@ -1,0 +1,12 @@
+{
+  "_comment": "Friday Linux — SPEC.md §8.3",
+  "AudioCaptureAllowedUrls": ["https://friday.local", "https://localhost"],
+  "VideoCaptureAllowedUrls": ["https://friday.local", "https://localhost"],
+  "SyncDisabled": true,
+  "BrowserSignin": 0,
+  "PasswordManagerEnabled": false,
+  "DefaultBrowserSettingEnabled": false,
+  "HomepageLocation": "https://localhost/",
+  "RestoreOnStartup": 4,
+  "RestoreOnStartupURLs": ["https://localhost/"]
+}

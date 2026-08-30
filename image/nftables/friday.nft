@@ -1,0 +1,36 @@
+#!/usr/sbin/nft -f
+# Friday Linux — SPEC.md §8.7: inbound drop by default, loopback allowed,
+# established/related allowed, 443/tcp and mDNS opened only when the LAN
+# toggle (Agent-Friday PR-10, SPEC.md §13) is on. This file ships the
+# always-on baseline; the LAN rules are added/removed by the
+# friday-os-helper (SPEC.md §14) when the toggle changes, not by editing
+# this file at runtime.
+flush ruleset
+
+table inet friday {
+    chain input {
+        type filter hook input priority 0; policy drop;
+
+        iif "lo" accept
+        ct state established,related accept
+        ct state invalid drop
+
+        # ICMP is needed for basic network diagnostics; kept minimal.
+        ip protocol icmp accept
+        ip6 nexthdr icmpv6 accept
+    }
+
+    chain forward {
+        type filter hook forward priority 0; policy drop;
+    }
+
+    chain output {
+        type filter hook output priority 0; policy accept;
+    }
+
+    # LAN listener rules (443/tcp, mDNS) are appended to a separate table
+    # ("friday-lan") by friday-os-helper when SPEC.md §13 PR-10's LAN toggle
+    # is enabled, and that table is flushed when it is disabled. Kept out of
+    # this static file so the always-on baseline is auditable independent
+    # of runtime toggle state (SPEC.md §16.4 security check).
+}

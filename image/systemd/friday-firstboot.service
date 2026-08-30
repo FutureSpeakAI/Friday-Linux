@@ -1,0 +1,16 @@
+# Friday Linux — SPEC.md §7.3. Runs once, before friday.service, per the
+# ConditionPathExists guard mirrored in friday.service (§8.1).
+[Unit]
+Description=Friday first-boot wizard
+Before=friday.service
+ConditionPathExists=!/var/lib/friday/.firstboot-done
+
+[Service]
+Type=simple
+ExecStart=/usr/share/friday/firstboot/wizard.py
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=infinity
+
+[Install]
+WantedBy=multi-user.target

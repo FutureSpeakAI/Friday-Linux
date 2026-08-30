@@ -1,0 +1,52 @@
+# Friday Linux — SPEC.md §14 (ci/build.yml), §6 size budget (G7).
+#
+# NOT YET RUNNABLE: this workflow calls `podman build` on the Containerfile,
+# which is itself blocked (see Containerfile header and
+# docs/DECISIONS.md "Blocking dependency: PR-1/2/3 not yet merged
+# upstream"). Written now so the structure exists and the size-check /
+# signing steps are ready the moment the venv-install step can run.
+#
+# Needs GitHub Actions repo/org secrets not yet provisioned: COSIGN_*
+# (SPEC.md §10.3) — not created here per the instruction not to touch
+# GitHub remotes/secrets without telling Stephen first.
+name: build
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read pins
+        id: pins
+        run: |
+          echo "agent_friday=$(cat build/agent-friday.pin | grep -v '^#' | head -1)" >> "$GITHUB_OUTPUT"
+          echo "llama_cpp=$(cat build/llama.cpp.pin 2>/dev/null | grep -v '^#' | head -1)" >> "$GITHUB_OUTPUT"
+
+      - name: Fail fast if pins are unresolved
+        if: steps.pins.outputs.agent_friday == '' || steps.pins.outputs.llama_cpp == ''
+        run: |
+          echo "::error::build/agent-friday.pin or build/llama.cpp.pin is unresolved — see docs/DECISIONS.md"
+          exit 1
+
+      - name: podman build
+        run: podman build -t friday-linux:testing -f Containerfile .
+
+      - name: Produce raw image (bootc-image-builder)
+        run: |
+          echo "UNVERIFIED (docs/VERIFY.md): exact bootc-image-builder invocation and build/disk.toml schema not confirmed" >&2
+          exit 1  # deliberately fails until VERIFY.md's disk.toml question is answered
+
+      - name: Size check (G7)
+        run: |
+          echo "TODO: fail if compressed raw image exceeds 8 GB, per SPEC.md G7"
+
+      - name: Sign with cosign (keyless, GitHub OIDC)
+        run: |
+          echo "UNVERIFIED (docs/VERIFY.md): exact cosign invocation not confirmed"
+          exit 1  # deliberately fails until VERIFY.md's cosign question is answered

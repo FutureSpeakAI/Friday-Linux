@@ -1,0 +1,24 @@
+# Friday Linux — SPEC.md §8.2. FIRST-DRAFT: Caddyfile path and CA storage
+# path are as specified; the exact "adapted from Agent-Friday/ops/Caddyfile"
+# transform (Windows paths replaced) is done in image/caddy/Caddyfile,
+# which is a stub pending a real read of that source file's current content.
+[Unit]
+Description=Friday Caddy (TLS on loopback, splash, first-boot wizard proxy)
+After=friday-lockbox.mount friday.service
+Requires=friday-lockbox.mount
+Wants=friday.service
+
+[Service]
+User=friday
+Group=friday
+ExecStart=/usr/bin/caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
+Environment=XDG_DATA_HOME=/var/lib/friday/caddy
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/friday/caddy
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+
+[Install]
+WantedBy=multi-user.target

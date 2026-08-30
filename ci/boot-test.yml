@@ -1,0 +1,47 @@
+# Friday Linux — SPEC.md §16.2. Depends on ci/build.yml producing a raw
+# image, which is currently blocked (see that file's header). Structure
+# matches §16.2's description; the exact qemu invocation is a best-effort
+# reading of that section, not yet run anywhere.
+name: boot-test
+
+on:
+  workflow_run:
+    workflows: [build]
+    types: [completed]
+  workflow_dispatch:
+
+jobs:
+  boot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Confirm KVM is available
+        run: |
+          ls -la /dev/kvm
+          # UNVERIFIED (docs/VERIFY.md): confirm this holds on current
+          # GitHub-hosted ubuntu-latest runners before relying on it.
+
+      - name: Inject friday-unattended.yaml into ESP
+        run: |
+          echo "TODO: mount the raw image's ESP partition (loop device) and copy in a test friday-unattended.yaml (SPEC.md §7.6)"
+
+      - name: Boot under QEMU/KVM with OVMF
+        run: |
+          echo "TODO per SPEC.md §16.2: qemu-system-x86_64 -M q35 -accel kvm -m 8G -bios OVMF.fd \\"
+          echo "  -drive file=friday-linux.raw,format=raw \\"
+          echo "  -drive file=second-disk.img,format=raw \\"
+          echo "  -nic user,hostfwd=tcp::3000-:3000"
+          exit 1  # deliberately fails: not yet implemented
+
+      - name: Assert /api/health within 300s
+        run: echo "TODO: curl http://127.0.0.1:3000/api/health, poll for boot_critical_ok"
+
+      - name: Assert sealed /usr
+        run: echo "TODO: over SSH or serial console, confirm 'touch /usr/x' fails"
+
+      - name: Assert lockbox layout (G3)
+        run: echo "TODO: confirm LUKS2 + Argon2id + five subvolumes"
+
+      - name: Assert no-trace on second disk (G2)
+        run: echo "TODO: SHA-256 the second disk's partition table + first 64 MiB of each partition before/after; assert identical"

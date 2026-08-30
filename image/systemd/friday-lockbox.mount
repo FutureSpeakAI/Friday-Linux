@@ -1,0 +1,41 @@
+# Friday Linux — SPEC.md §5, §8. FIRST-DRAFT / NEEDS REVIEW.
+#
+# The spec's architecture diagram (§4) and friday.service (§8.1, copied
+# verbatim in friday.service) both reference a single unit named exactly
+# "friday-lockbox.mount" that other units gate on. A systemd .mount unit
+# corresponds to exactly one mountpoint, but §5 mounts FIVE btrfs subvolumes
+# to five different paths (@home, @models, @workshop, @journal, @snapshots),
+# and §7.3 step 4 says the first-boot wizard "writes /etc/crypttab and the
+# mount units" — meaning the real per-subvolume mount units are generated at
+# first boot, not baked into the image, since the lockbox doesn't exist
+# until then (ADR-004).
+#
+# This file is therefore the OUTER mount only: it decrypts and mounts the
+# lockbox's top-level btrfs volume so its subvolumes become mountable. The
+# per-subvolume units (home-friday.mount, var-lib-friday-models.mount,
+# var-lib-friday-workshop.mount, var-log-journal.mount) are written by
+# image/firstboot/ alongside /etc/crypttab, each with
+# "RequiresMountsFor=/run/friday-lockbox" so they gate on this unit, and
+# friday.service's After=friday-lockbox.mount should arguably be
+# After=friday-lockbox.mount home-friday.mount var-lib-friday-models.mount —
+# but the spec's given friday.service text (§8.1) names only
+# friday-lockbox.mount, so that text is kept verbatim in friday.service and
+# this ambiguity is recorded in docs/DECISIONS.md under "Deviations" rather
+# than silently resolved by editing the spec's given unit file.
+#
+# /etc/crypttab (written by the first-boot wizard, not this repo):
+#   friday-lockbox  UUID=<lockbox-partition-uuid>  none  luks
+#
+[Unit]
+Description=Friday lockbox (LUKS2 + btrfs top-level volume)
+Before=friday.service
+RequiresMountsFor=/dev/mapper/friday-lockbox
+
+[Mount]
+What=/dev/mapper/friday-lockbox
+Where=/run/friday-lockbox
+Type=btrfs
+Options=subvolid=5,noatime
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,27 @@
+# Friday Linux — SPEC.md §8.1. Text below the [Unit]/[Service] blocks is
+# copied verbatim from the spec; do not add directives beyond it without
+# updating docs/DECISIONS.md per rule 5 (never invent unverified specifics).
+[Unit]
+After=friday-lockbox.mount network-online.target
+Requires=friday-lockbox.mount
+ConditionPathExists=/var/lib/friday/.firstboot-done
+[Service]
+User=friday
+Group=friday
+EnvironmentFile=/etc/friday/os.env
+EnvironmentFile=-/var/lib/friday/secrets.env
+ExecStart=/usr/lib/friday/venv/bin/friday
+WorkingDirectory=/home/friday
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/home/friday /var/lib/friday /tmp
+PrivateTmp=yes
+DeviceAllow=/dev/nvidia* rw
+DeviceAllow=/dev/dri rw
+SupplementaryGroups=video render audio
+TimeoutStartSec=600
+
+[Install]
+WantedBy=multi-user.target

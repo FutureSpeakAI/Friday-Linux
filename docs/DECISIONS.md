@@ -1,14 +1,79 @@
 # Decisions
 
-This file records, per SPEC.md rules 2 and 3: objections to DECIDED items,
-and which default was taken for each OPEN item, plus any path choice the spec
-asked to be recorded (e.g. Section 4.1's base-image fallback).
+Per SPEC.md §18 rule 1, this file leads with the five required ADRs before
+any Containerfile work. Per rule 2, challenges to DECIDED items go under
+"Challenges" and do not change what gets built. Per rule 3, OPEN items (§17)
+get their default recorded here when a milestone actually depends on one.
+Per rule 7, deviations from the spec go under "Deviations."
 
-No milestone work has started (Sections 15/18 not yet received), so nothing
-below is a build-time decision yet. This first entry is ground-truth
-established while reading `Agent-Friday` in preparation, per the task's
-instruction to record every gap between what the spec assumes and what the
-code contains.
+## ADR-001: bootc as the build/update mechanism
+
+**Decision:** One Containerfile builds three artifacts — an OCI image, a raw
+disk image, and an installer ISO — via bootc, rather than a hand-rolled live
+ISO with a persistent overlay.
+
+**Rationale (§4.2):** Overlays corrupt when full and cannot roll back.
+Atomic updates with rollback and greenboot health gating come with bootc for
+free, and the same Containerfile serves the "container edition" use case
+(any `podman` can run the OCI image directly) discussed for macOS/Windows
+without a second build pipeline.
+
+## ADR-002: Universal Blue base image, not raw `fedora-bootc`
+
+**Decision:** Base on Universal Blue's Fedora Atomic images (`ghcr.io/ublue-os`
+`base-main`/`base-nvidia` family), falling back to `fedora-bootc` +
+`akmods-nvidia` layering if no kiosk-suitable NVIDIA-enabled minimal variant
+exists.
+
+**Rationale (§4.1):** Universal Blue already builds and signs NVIDIA kernel
+modules for every Fedora kernel with Secure Boot enrollment tooling and
+weekly rebuilds, proven in production by Bazzite and Bluefin. A one-person
+shop should not build and sign NVIDIA kmods itself in v1. Cost: v1 users
+enroll Universal Blue's MOK key, not a Friday-owned one (P1, §10.4).
+
+**Path taken:** Not yet determined — blocked on VERIFY.md Q4/Q5 (image
+name/digest, Fedora release). Whichever path is taken gets recorded here
+before the Containerfile is written, per this ADR's own rule.
+
+## ADR-003: no client hypervisor in v1
+
+**Decision:** Friday Linux does not run the host's installed Windows or
+macOS as a guest.
+
+**Rationale (§1.1):** GPU contention, TPM/BitLocker friction, and Apple's
+boot policy make that a separate, later, hardware-listed project. Bundling
+it into v1 would mean solving three hard problems (GPU passthrough,
+BitLocker-safe guest boot, Apple virtualization entitlements) before
+shipping the sovereignty claim the OS actually exists to make.
+
+## ADR-004: the lockbox is created at first boot, not shipped in the image
+
+**Decision:** The shipped raw image contains only the OS (16 GiB fixed root).
+The LUKS2 lockbox is created on the remaining space of the boot device
+during the first-boot wizard.
+
+**Rationale (§5):** Keeps the shipped image generic — no two sticks share
+encryption metadata — and makes "grow to fill the drive" free regardless of
+whether the drive is 128 GB or 2 TB. The alternative (pre-provisioning a
+lockbox partition sized at build time) would force a choice of drive size
+into the image itself.
+
+## ADR-005: skills are data; the OS layer is code
+
+**Decision:** Agent Friday's self-improvement (§12) may edit its own code in
+`@workshop`, test it, and run it live via a transient `bootc usr-overlay`
+that is discarded on reboot, promoting only through an upstream pull request
+(§11.3). Skill dependencies install into per-skill venvs under
+`@workshop/envs/<skill>/`, never into the app's own venv.
+
+**Rationale:** This is the forced answer to `KNOWN_ISSUES.md` §3's problem —
+skill dependency installation was untested and unbounded. Under
+`FRIDAY_OS_MODE=1` the app is made to refuse `pip install` into its own venv
+outside an overlay session (§12), so a skill cannot silently widen what code
+runs sealed. A skill is data; the sealed `/usr` never changes except through
+a signed image.
+
+---
 
 ## Repo identity (not a spec item, but cost time before)
 
@@ -21,84 +86,169 @@ confirmation commands and output.
 
 ## Challenges to DECIDED items
 
-None yet. Sections 0-6 contain no DECIDED item the ground-truth read
-contradicts at the decision level — the contradictions found are about where
-things live and whether they exist at all in `Agent-Friday` today, which are
-factual gaps rather than disagreements with a decision. See the executor's
-report for the full gap list; the two most load-bearing are:
+None. Nothing in the now-complete document contradicts a DECIDED item at the
+decision level. The gap list below is about whether the current
+`Agent-Friday` code already does what Section 13's upstream PRs propose to
+make it do — which is a statement about *readiness*, not a disagreement with
+the *decision*. Section 13 exists precisely because the gaps below were
+already anticipated; reading the real code confirms the PRs are aimed at
+real problems, not imagined ones.
 
-1. **Section 4/6 assume the residency layer can spawn `llama-server` on
-   Linux.** As of `v5.7.0` it cannot — see "Gap: engine binaries are
-   Windows-only" below. This isn't a challenge to the DECIDED architecture,
-   it's a statement that the architecture currently has no floor to stand on
-   until an upstream change lands. That upstream change is presumably in
-   Section 13, not yet received.
-2. **Section 2's definition attributes the hardware ladder to
-   `services/residency_policy.py`.** The ladder (VRAM tier -> model id) is
-   actually owned by `services/model_plan.py`; `residency_policy.py` is the
-   per-role placement/refusal engine that consumes model sizes but does not
-   itself define the tier table. Not a DECIDED item, so recorded here as a
-   correction rather than a challenge — Friday Linux's own code should read
-   the ladder from `model_plan.py`.
+## Gap list: what §13's upstream PRs assume vs. what `Agent-Friday` v5.7.0 actually contains
 
-## OPEN items and defaults taken
+Kept per Stephen's instruction, since it is still the highest-value
+early-verification work — it tells us which PRs are pointed at real code and
+which specifics in the PR descriptions are already slightly off. Every
+figure below was re-checked with `git show v5.7.0:<path>` against the real
+`friday-desktop` checkout, not the `Agent-Friday` decoy.
 
-None yet — no OPEN items have been reached, because Sections 7-18 (which is
-where most of the spec's own OPEN items are expected to live, based on the
-Section 0 outline) have not been transmitted. Sections 0-6 as received
-contain no item explicitly marked OPEN.
+- **PR-2's target, `core/os_mode.py`, does not exist at v5.7.0.** Confirmed
+  (`git show v5.7.0:src/agent_friday/core/os_mode.py` → fatal: does not
+  exist). Expected — PR-2 is the PR that creates it. Noted only because it
+  means `FRIDAY_OS_MODE` currently does *nothing*: grepping the whole tree
+  at v5.7.0 returns zero hits. Every "under OS mode, X changes" sentence in
+  §§7-13 describes code that must be written from scratch, not code that
+  exists and needs its default flipped.
 
-## Gaps between spec assumptions and `Agent-Friday` ground truth
+- **PR-4's target, `FRIDAY_LLAMA_SERVER_BIN`, does not exist at v5.7.0.**
+  Zero hits repo-wide. Confirms the engine-discovery mechanism in §9.1 is
+  entirely new, not a rename of an existing variable. The thing it replaces
+  is real and precisely as described: `services/residency_arbiter.py:337`
+  (`ollama_engine_path()`, hardcoded `...\Ollama\lib\ollama\llama-server.exe`)
+  and `:545` (`self.binary = ... / "llama-server.exe"` in the seat-spawning
+  class) — both Windows-only paths, exactly as PR-4 states. `KNOWN_ISSUES.md`
+  §6 confirms in prose: "On Linux, no llama-server seat can load at all (the
+  engine candidates are `.exe`), so you are Ollama-only."
 
-Full detail with file:line citations lives in the executor's report for this
-session. Summary, ranked by how much they block Sections 0-6's architecture:
+- **PR-4's GPU-probe target is confirmed exactly as described.**
+  `services/hardware_profile.py:204` (`detect_gpus()`) shells out only to
+  `nvidia-smi`; no Vulkan, AMD, or Intel probe exists anywhere in the file.
+  The "Windows only for the moment" comment PR-4/§9.2 cites is real, at
+  `hardware_profile.py:280`, on `live_display_mib()` — the function's own
+  docstring says so verbatim: "Windows only for the moment... the reading
+  comes from the OS performance counters instead." §9.2's claim that this
+  "becomes Linux-first" is therefore a real rewrite, not a flag flip: the
+  Linux replacement (`nvidia-smi --query-compute-apps`) needs its own
+  implementation, since the current code path for Linux doesn't exist yet
+  either.
 
-- **`FRIDAY_OS_MODE` does not exist anywhere in `Agent-Friday` at `v5.7.0`.**
-  Grepped the full tree; zero hits. Section 2 defines it and Section 4 wires
-  it into `friday.service`, but there is currently nothing on the app side
-  for it to switch. This is almost certainly a Section 13 upstream PR; noted
-  here so it isn't lost.
-- **The residency layer's engine binaries are hardcoded to Windows
-  `.exe` paths** — `services/residency_arbiter.py:337` (`ollama_engine_path()`
-  building `...\Ollama\lib\ollama\llama-server.exe`) and `:545`
-  (`self.binary = ... / "llama-server.exe"` in the seat-spawning class).
-  `KNOWN_ISSUES.md` §6 confirms this in prose: "On Linux, no llama-server seat
-  can load at all (the engine candidates are `.exe`), so you are Ollama-only."
-  Section 6's BOM ships `llama-server-cuda`/`llama-server-vulkan` at
-  `/usr/libexec/friday/`, but nothing in the app today knows to look there
-  instead of a `.exe`. This has to be a Section 13 item.
-- **GPU detection is NVIDIA-only.** `services/hardware_profile.py:204`
-  (`detect_gpus()`) shells out to `nvidia-smi` and nothing else — no Vulkan,
-  no AMD, no Intel probe anywhere in the file. `KNOWN_ISSUES.md` §6: "AMD GPUs
-  are invisible on every platform — `nvidia-smi` is the only probe." Section 3
-  commits Friday Linux to Tier 2 support for AMD RDNA2+ and Intel Arc via
-  Vulkan; the upstream hardware profiler cannot see those cards at all today.
-- **The vault passphrase has no durable home on Linux without the `keyring`
-  extra, and Section 6's venv extras list does not include `keyring`.**
-  `services/vault_passphrase.py:305-343` (`store()`) writes to the OS keychain
-  via the `keyring` package if importable, and to a DPAPI-wrapped file if
-  `dpapi_available()` (`os.name == "nt"`, hardcoded Windows-only). On Linux
-  without `keyring` installed, both branches no-op and `store()` returns `[]`
-  — the function's own docstring: "An empty return means nothing durable could
-  be written." This is exactly what Stephen flagged as tonight's finding.
-  Fix is plausibly two-sided: add `keyring` to the venv extras (it does
-  support Linux via Secret Service/kwallet) *and* Section 6's BOM would need
-  to add a Secret Service provider or equivalent to the image, since none is
-  currently listed. Whether that's the intended fix or whether Section 13
-  does something else is unknown without Section 13.
-- **`pystray` aborts test collection when absent.** Single unconditional
-  `import pystray` at `src/agent_friday/friday_tray.py:21`. The `[windows]`
-  extra gates it at install time (`pyautogui`, `pynput`, `pillow`,
-  `pystray`), and Friday Linux's extras list correctly omits `[windows]`, so
-  the *installed image* is fine. The gap is in the *test suite*: something
-  under `tests/` imports `friday_tray` (transitively or directly) without a
-  platform/import guard, so pytest collection aborts on any machine — Linux
-  CI included — that doesn't have `pystray` installed. Relevant to Section 16
-  (tests), not yet received, but worth surfacing now since it'll block CI on
-  this repo the moment tests are added if upstream doesn't fix it first.
+- **PR-5's target line is exact.** `services/credential_store.py:151`:
+  `print("[credstore] WARNING: no FRIDAY_PASSWORD and no DPAPI — credentials "...)`.
+  PR-5 proposes making this fail closed under OS mode instead of falling
+  through to plaintext. Separately, `services/vault_passphrase.py:305-343`
+  (`store()`) is the *other* place this same class of gap lives — it writes
+  to `keyring` if importable and to a DPAPI file if `dpapi_available()`
+  (`os.name == "nt"`), and on Linux without `keyring` installed, both
+  branches no-op and `store()` returns `[]`. PR-5 names `credential_store.py`
+  specifically; whether it also intends to fix `vault_passphrase.py`'s
+  identical failure mode isn't stated. Worth confirming before M2, since
+  Section 6's BOM venv extras list (`[voice-local-lite,local,compression,
+  federation,google,compose,provenance]`) still does not include `keyring`,
+  and no Secret Service provider (`gnome-keyring`, gcr, etc.) appears in
+  Section 6's system package list either — so even after PR-5 lands,
+  `store()` has nowhere durable to write on Friday Linux unless both of
+  those are also added. Flagging for M2 planning, not blocking M0.
 
-## Path taken for Section 4.1 fallback
+- **PR-1's 22-file list checks out.** Verified every named file at v5.7.0
+  contains some form of `Path.home() / ".friday"` (a couple use the split
+  form `Path(friday_dir or Path.home() / ".friday")`, which is why a naive
+  exact-string grep undercounts — checked each file individually and all 22
+  are real hits). No stale entries, no missing ones found.
 
-Not yet applicable — no image build has started. `docs/VERIFY.md` lists the
-commands needed to check whether the NVIDIA-enabled minimal Universal Blue
-base exists in kiosk-suitable form before this decision can be made for real.
+- **Ladder ownership, corrected.** §2 attributes the hardware ladder to
+  `services/residency_policy.py`; the actual VRAM-tier → model-id table
+  lives in `services/model_plan.py` (`MODELS` list, e.g.
+  `model_plan.py:141` for `qwen3:4b`). `residency_policy.py` is the
+  per-role placement/refusal engine (`plan()`, `ROLES`, `ROLE_RESIDENCY`)
+  that consumes model sizes but does not define the tier table itself. This
+  doesn't affect any §13 PR text, which correctly cites
+  `services/residency_policy.py` for the *refusal/degraded-posture* logic
+  (§9.5, PR-4) rather than the ladder — only §2's glossary entry is loose.
+  Friday Linux code that needs the ladder itself (e.g. the wizard's plan
+  step, §7.3 step 6) should read `model_plan.py`.
+
+- **`pystray` aborts test collection when absent, unrelated to any PR.**
+  Single unconditional `import pystray` at
+  `src/agent_friday/friday_tray.py:21`. The `[windows]` extra gates it at
+  install time and Friday Linux's extras list correctly excludes
+  `[windows]`, so the *installed image* is unaffected. The gap is in the
+  *test suite*: something under `tests/` imports `friday_tray` without a
+  platform guard, so pytest collection aborts on Linux without `pystray`
+  installed. PR-8 adds an `os-mode` CI job on `ubuntu-latest` with no
+  `[windows]` extra — if this import guard isn't fixed first, that job
+  cannot even collect tests. Worth surfacing to whoever picks up PR-8.
+
+## Blocking dependency: PR-1/2/3 not yet merged upstream
+
+§13's last paragraph is explicit: "Friday Linux M0 (Section 15) can start on
+`main` with PR-1 through PR-3 merged." Checked both `v5.7.0` and the current
+`friday-desktop` HEAD (4 commits past `v5.7.0`, all docs/WIP work explicitly
+marked "INCOMPLETE, DO NOT SHIP," unrelated to PR-1/2/3): neither
+`core/os_mode.py` (PR-2) nor `core/paths.py` (PR-1) exists at either point,
+and there is no packaged `agent_friday/seed/` (PR-3).
+
+This means `build/agent-friday.pin` cannot be filled in with a real value
+yet — the app has nowhere to pin that makes `FRIDAY_OS_MODE=1` do anything,
+which is load-bearing for essentially every service definition in §8. This
+is not something Friday-Linux-the-repo can work around: PR-1/2/3 are
+upstream `Agent-Friday` work, tracked in that repo, not this one. Recorded
+here rather than silently substituting `v5.7.0` and pretending OS mode
+works, and flagged in the executor's report as the single most important
+scheduling fact in the whole document.
+
+What can proceed in the meantime, per rule 3 (a §17-style default, though
+this isn't a numbered open question): author the Containerfile, systemd
+units, and CI skeleton against a placeholder pin, since none of that content
+depends on PR-1/2/3's code existing — only the final `podman build` step
+(installing the venv from the pinned tag) is blocked.
+
+## Deviations
+
+Per rule 7: the smallest change that preserves intent, recorded rather than
+silently made, for each place the spec's text couldn't be used verbatim.
+
+- **`[Install]` sections added to every systemd unit.** §8.1 gives
+  `friday.service`'s `[Unit]`/`[Service]` blocks verbatim with no
+  `[Install]` section; without one, `systemctl enable` (which the
+  Containerfile runs) fails with "unit has no installation config." Added
+  `WantedBy=multi-user.target` (or `graphical.target` for the kiosk unit) to
+  every authored unit. This is standard systemd plumbing, not a behavioral
+  choice — flagged here only because rule 2 says DECIDED text is kept
+  verbatim and this technically appends to it.
+
+- **`friday-lockbox.mount` is a single outer mount, not five.** §5 mounts
+  five btrfs subvolumes to five different paths, but `friday.service`'s
+  given text (§8.1) names exactly one unit, `friday-lockbox.mount`, in its
+  `After=`. Implemented `friday-lockbox.mount` as the outer LUKS+btrfs mount
+  at `/run/friday-lockbox`, with the five subvolume-specific mounts to be
+  generated by the first-boot wizard (per §7.3 step 4's own text: "writes
+  /etc/crypttab and the mount units") once the lockbox exists. Full
+  reasoning and the open question about whether `friday.service` should
+  additionally depend on the per-subvolume units is in that file's header
+  comment. Not resolved here because it needs a real systemd install to
+  check `systemctl enable` and dependency ordering against, which this
+  sandbox cannot do.
+
+- **`image/caddy/Caddyfile` is adapted from a real read of
+  `Agent-Friday/ops/Caddyfile` at v5.7.0** (via `git show`), not written
+  from the one-line description in §8.2. Site address changed from
+  `agent.friday` (the Windows version) to `friday.local`/`localhost` to
+  match §8.2's own text and what `friday-kiosk.service` (§8.3) actually
+  navigates Chromium to. Storage path changed from a Windows ProgramData
+  path to `/var/lib/friday/caddy`, since Friday Linux has no SYSTEM-vs-user
+  account split (both services run as `User=friday`) — the reason the
+  Windows version used a machine-wide path doesn't apply here.
+
+- **CI workflows (`ci/build.yml`, `ci/boot-test.yml`) contain deliberate
+  `exit 1` steps** where a command's exact syntax is UNVERIFIED
+  (`bootc-image-builder` invocation, `cosign` invocation, the QEMU boot
+  command). These fail loudly rather than being written as a plausible
+  guess that could pass CI without actually doing anything — per rule 5,
+  never invent a version or a syntax and present it as working.
+
+- **`image/firstboot/wizard.py` raises `NotImplementedError` for lockbox
+  creation and unattended-file parsing**, rather than shipping a plausible
+  but unverified `cryptsetup`/`mkfs.btrfs`/YAML-parsing implementation. Same
+  reasoning as the CI deviation above: a script that looks complete but was
+  never run against a real cryptsetup/btrfs version is worse than one that
+  states exactly what's missing.

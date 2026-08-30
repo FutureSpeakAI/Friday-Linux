@@ -1,0 +1,48 @@
+# Friday Linux — SPEC.md §8.2. Adapted from Agent-Friday/ops/Caddyfile
+# (read at v5.7.0: git show v5.7.0:ops/Caddyfile). Changes from the source:
+#   - storage: Windows ProgramData path -> /var/lib/friday/caddy (the
+#     lockbox), since there is no SYSTEM-vs-user account split on this OS —
+#     friday.service and friday-caddy.service both run as User=friday.
+#   - site address: agent.friday -> friday.local and localhost, per §8.2's
+#     text ("Serves https://friday.local and https://localhost to the
+#     kiosk"), matching what friday-kiosk.service (§8.3) actually navigates
+#     Chromium to (https://localhost/).
+#   - splash page: the source file has no splash/wizard route because
+#     Windows Agent Friday has neither. Added below per §7.1 step 4 — the
+#     splash's own client-side JS polls /api/health and navigates once it
+#     returns 200; Caddy's job here is only to serve the static files and
+#     let the app's routes (including /api/health itself) fall through to
+#     the reverse_proxy.
+# Everything else (reverse_proxy retry/flush settings, `tls internal`) is
+# kept as the source states it, since that reasoning is unchanged by OS.
+{
+	admin 127.0.0.1:2019
+
+	storage file_system {
+		root "/var/lib/friday/caddy"
+	}
+}
+
+friday.local, localhost {
+	bind 127.0.0.1 ::1
+
+	tls internal
+
+	# Splash and first-boot wizard static assets (§7.1, §7.3) are served
+	# directly; everything else falls through to the app.
+	handle_path /splash/* {
+		root * /usr/share/friday/splash
+		file_server
+	}
+
+	reverse_proxy 127.0.0.1:3000 {
+		flush_interval -1
+		lb_try_duration 15s
+		lb_try_interval 250ms
+	}
+
+	log {
+		output file "/var/lib/friday/caddy/access.log"
+		format console
+	}
+}

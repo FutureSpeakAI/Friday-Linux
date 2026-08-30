@@ -1,0 +1,5 @@
+# This repo's payload (systemd units, shell scripts, Python, TOML/YAML/JSON
+# config) all runs on Linux inside the image. Force LF regardless of the
+# checkout platform — a CRLF shell script fails with "bad interpreter" on
+# real hardware, and this is being authored from a Windows sandbox.
+* text=auto eol=lf

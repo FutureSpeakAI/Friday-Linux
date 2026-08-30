@@ -1,0 +1,113 @@
+#!/usr/bin/env python3
+"""friday-os-helper — SPEC.md §13 PR-10, §14.
+
+The ONLY privileged surface Agent Friday's OS-mode routes (upstream PR-10,
+not yet merged — see docs/DECISIONS.md) shell out to, via `sudo` restricted
+by the sudoers.d rule in this same directory's sibling file. Every
+subcommand is explicit; anything else is rejected before any privileged
+action runs, per PR-10's acceptance criterion: "the helper rejects any
+argument not in its allowlist."
+
+M0/M1 status: subcommands are stubs that print what they would do rather
+than performing the privileged action, since none of this has been
+exercised against a real bootc/greenboot install yet (no Linux/KVM in this
+sandbox — see docs/VERIFY.md). Do not treat the "would run" lines as
+verified command syntax; each is UNVERIFIED per rule 5 until checked
+against a real image.
+"""
+from __future__ import annotations
+
+import argparse
+import subprocess
+import sys
+
+# The strict allowlist. PR-10 acceptance: "a test proves the sudoers rule
+# cannot be used to run anything else" — that test lives in tests/unit/
+# once this repo has a Linux CI runner to run it on (SPEC.md §16.1).
+SUBCOMMANDS = (
+    "status", "update-check", "update-apply-on-reboot", "rollback",
+    "reboot", "poweroff", "lan-on", "lan-off", "overlay-on", "overlay-off",
+    "diagnostics", "journal",
+)
+
+
+def _would_run(cmd: list[str]) -> int:
+    print(f"[friday-os-helper] UNVERIFIED, would run: {' '.join(cmd)}")
+    return 0
+
+
+def cmd_status(_args: argparse.Namespace) -> int:
+    return _would_run(["bootc", "status", "--json"])
+
+
+def cmd_update_check(_args: argparse.Namespace) -> int:
+    return _would_run(["bootc", "update", "--check"])
+
+
+def cmd_update_apply_on_reboot(_args: argparse.Namespace) -> int:
+    return _would_run(["bootc", "upgrade"])
+
+
+def cmd_rollback(_args: argparse.Namespace) -> int:
+    return _would_run(["bootc", "rollback"])
+
+
+def cmd_reboot(_args: argparse.Namespace) -> int:
+    return _would_run(["systemctl", "reboot"])
+
+
+def cmd_poweroff(_args: argparse.Namespace) -> int:
+    return _would_run(["systemctl", "poweroff"])
+
+
+def cmd_lan_on(_args: argparse.Namespace) -> int:
+    # SPEC.md §8.2, §8.7: opens 443/tcp + mDNS in the friday-lan nftables
+    # table (see image/nftables/friday.nft) and requires FRIDAY_REMOTE_KEY
+    # auth on the app side — the helper only flips the firewall/Avahi state.
+    return _would_run(["nft", "-f", "/etc/nftables/friday-lan.nft"])
+
+
+def cmd_lan_off(_args: argparse.Namespace) -> int:
+    return _would_run(["nft", "flush", "table", "inet", "friday-lan"])
+
+
+def cmd_overlay_on(_args: argparse.Namespace) -> int:
+    # SPEC.md §12: Ring 3, per-session enablement required upstream before
+    # this is ever called — the helper does not itself gate on that; the
+    # app route (PR-10) is responsible for the Ring 3 check.
+    return _would_run(["bootc", "usr-overlay"])
+
+
+def cmd_overlay_off(_args: argparse.Namespace) -> int:
+    return _would_run(["systemctl", "reboot"])  # overlay is discarded on reboot, §12
+
+
+def cmd_diagnostics(_args: argparse.Namespace) -> int:
+    return _would_run(["journalctl", "-b", "-o", "json"])
+
+
+def cmd_journal(args: argparse.Namespace) -> int:
+    cmd = ["journalctl", "-n", str(args.lines)]
+    if args.unit:
+        cmd += ["-u", args.unit]
+    return _would_run(cmd)
+
+
+def main(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(prog="friday-os-helper")
+    sub = parser.add_subparsers(dest="subcommand", required=True)
+
+    for name in SUBCOMMANDS:
+        p = sub.add_parser(name)
+        fn_name = "cmd_" + name.replace("-", "_")
+        p.set_defaults(func=globals()[fn_name])
+        if name == "journal":
+            p.add_argument("--unit", default=None)
+            p.add_argument("--lines", type=int, default=200)
+
+    args = parser.parse_args(argv)
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

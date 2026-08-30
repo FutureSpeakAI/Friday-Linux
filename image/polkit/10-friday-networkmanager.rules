@@ -1,0 +1,13 @@
+// Friday Linux — SPEC.md §7.3 step 2: lets the `friday` user manage its own
+// Wi-Fi connections from the first-boot wizard without a password prompt,
+// scoped to only its own network profiles (not system-wide network admin).
+polkit.addRule(function(action, subject) {
+    if (subject.user != "friday") {
+        return polkit.Result.NOT_HANDLED;
+    }
+    if (action.id == "org.freedesktop.NetworkManager.settings.modify.own" ||
+        action.id == "org.freedesktop.NetworkManager.network-control") {
+        return polkit.Result.YES;
+    }
+    return polkit.Result.NOT_HANDLED;
+});

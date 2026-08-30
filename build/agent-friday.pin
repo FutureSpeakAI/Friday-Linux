@@ -1,0 +1,8 @@
+# UNRESOLVED — see docs/DECISIONS.md "Blocking dependency: PR-1/2/3 not yet merged"
+#
+# §13's landing order states M0 can start on `main` only once PR-1 through
+# PR-3 are merged upstream. Neither exists yet: core/os_mode.py and
+# core/paths.py are both absent from Agent-Friday at v5.7.0 and at the
+# current friday-desktop HEAD (4 commits past v5.7.0, none of them PR-1/2/3
+# work). Pinning v5.7.0 here would be pinning a tag FRIDAY_OS_MODE does
+# nothing on. Do not fill this in with a real tag/commit until PR-1/2/3 land.

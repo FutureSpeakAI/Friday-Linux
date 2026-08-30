@@ -1,0 +1,8 @@
+# Friday Linux — SPEC.md §13 PR-10, §14. The only sudo rule in the image.
+# Scoped to the exact binary and nothing else; the binary's own argparse
+# allowlist (helper/friday-os-helper/friday-os-helper) is the second layer,
+# per PR-10's acceptance criterion that a test prove this cannot be used to
+# run anything else. NOPASSWD because the routes calling this run as
+# User=friday inside friday.service (§8.1), which has no interactive
+# terminal to prompt on.
+friday ALL=(root) NOPASSWD: /usr/libexec/friday/friday-os-helper
