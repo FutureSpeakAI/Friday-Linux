@@ -58,17 +58,30 @@ jobs:
             /opt/az /usr/lib/jvm || true
           echo "after:" && df -h /
 
-      # sudo matters here, not just habit: bootc-image-builder below runs as
-      # root (it needs loop-device access) and reads images from root's
-      # podman storage (/var/lib/containers/storage), which is a SEPARATE
-      # store from the unprivileged "runner" user's rootless storage. CI run
-      # 33322712869 built the image without sudo, then bootc-image-builder
-      # (correctly) reported "localhost/friday-linux:testing: image not
-      # known" because it was looking in root's store and the image only
-      # existed in the rootless one. Building as root from the start keeps
-      # both steps looking at the same storage.
       - name: podman build
-        run: sudo podman build -t friday-linux:testing -f Containerfile .
+        run: podman build -t friday-linux:testing -f Containerfile .
+
+      # bootc-image-builder below runs as root (it needs loop-device
+      # access) and reads images from root's podman storage
+      # (/var/lib/containers/storage), a SEPARATE store from the
+      # unprivileged "runner" user's rootless storage the step above just
+      # built into. CI run 33322712869 hit exactly that mismatch
+      # ("localhost/friday-linux:testing: image not known" from inside
+      # bootc-image-builder). The first fix tried was building the whole
+      # image again with `sudo podman build` — CI run 33323791375 then hit a
+      # SEPARATE, unrelated failure specific to the root/sudo podman
+      # environment on this runner (`dnf`'s $releasever failed to expand,
+      # "database disk image is malformed") that never happened across many
+      # rootless builds, and re-running the ~20-minute build a second time
+      # under sudo just to move storage is wasteful even when it works. This
+      # is the actual fix: build once, rootless, as before (reliable), then
+      # move the already-built image into root's store with `podman save` /
+      # `sudo podman load` — a tar round-trip, not a rebuild.
+      - name: Copy built image into root's podman storage
+        run: |
+          podman save -o /tmp/friday-linux.tar localhost/friday-linux:testing
+          sudo podman load -i /tmp/friday-linux.tar
+          rm -f /tmp/friday-linux.tar
 
       - name: Discover bootc-image-builder CLI (docs/VERIFY.md disk.toml question)
         run: |

@@ -309,6 +309,24 @@ figure below was re-checked with `git show v5.7.0:<path>` against the real
   build that is genuinely disk-heavy (a C++ compile plus a ~90-package
   Python venv, both in the same job).
 
+- **Deviation D-A7: move the built image into root's podman storage with
+  `podman save`/`sudo podman load`, instead of rebuilding under `sudo`.**
+  CI run 33322712869 confirmed the rootless/rootful podman storage split:
+  `bootc-image-builder` (needs `sudo`, for loop-device access) couldn't see
+  an image built by plain `podman build` (rootless storage) — "image not
+  known." The first fix tried, `sudo podman build` for the whole
+  Containerfile (D-A6/prior commit), traded that problem for a new one: CI
+  run 33323791375's `sudo` environment hit `dnf`'s `$releasever` failing to
+  expand and "database disk image is malformed" during the exact same `RUN
+  dnf install -y git uv` line that had already succeeded cleanly (rootless)
+  in every prior run — a root-podman-specific environment issue on this
+  runner, not a Containerfile bug — and cost a full ~20-minute rebuild to
+  discover. Fixed properly: build once, rootless (reliable, already proven
+  across many runs), then `podman save -o /tmp/friday-linux.tar
+  localhost/friday-linux:testing` followed by `sudo podman load -i
+  /tmp/friday-linux.tar` — a tar round-trip that moves the already-built
+  image into root's store without re-running the build at all.
+
 ## Blocking dependency: PR-1/2/3 not yet merged upstream
 
 §13's last paragraph is explicit: "Friday Linux M0 (Section 15) can start on
