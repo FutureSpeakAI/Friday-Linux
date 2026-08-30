@@ -204,6 +204,23 @@ dnf repoquery --available vulkan-headers vulkan-loader-devel vulkan-tools glslc 
 dnf provides '*/glslc'
 ```
 
+## 2026-08-30 — bootc-image-builder: real manifest error, `DefaultRootFs`
+
+CI run 33325393238 got the built image into root's podman storage (D-A7)
+and reached real `bootc-image-builder` manifest generation for the first
+time. It failed with: `error: cannot build manifest: failed to initialize
+bootc distro: missing required info: DefaultRootFs`. This means
+`bootc-image-builder` needs to know the root filesystem type and isn't
+inferring it from a plain `fedora-bootc:44` base on its own (or this
+repo's Containerfile changes something that used to supply it — not yet
+determined which). Tried `--rootfs xfs` (Fedora's traditional root fs
+default) as a best-effort, UNVERIFIED flag value — not confirmed against
+real `bootc-image-builder build --help` output at the time this was
+written. `build.yml`'s "Discover" step now also runs `bootc-image-builder
+build --help` in full (not just the top-level `--help`, which only lists
+subcommands) so the real flag surface is captured in CI's own log
+regardless of whether `--rootfs xfs` turns out to be right.
+
 ## 2026-08-30 — `build/disk.toml`: still deferred, deliberately, not guessed
 
 Per this file's own long-standing entry above ("`bootc-image-builder` disk

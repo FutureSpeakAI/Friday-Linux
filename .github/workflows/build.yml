@@ -84,10 +84,18 @@ jobs:
           rm -f /tmp/friday-linux.tar
 
       - name: Discover bootc-image-builder CLI (docs/VERIFY.md disk.toml question)
+        # Top-level --help only lists subcommands (build, manifest, ...); the
+        # actual build-time flags (rootfs override, disk config, etc.) live
+        # under `build --help`, which CI run 33325393238 never captured
+        # before this step's own `build` invocation failed with "missing
+        # required info: DefaultRootFs" - logging both here now so the next
+        # fix is read from real output, not guessed twice.
         run: |
           mkdir -p output
           echo "--- bootc-image-builder --help ---"
           sudo podman run --rm quay.io/centos-bootc/bootc-image-builder:latest --help
+          echo "--- bootc-image-builder build --help ---"
+          sudo podman run --rm quay.io/centos-bootc/bootc-image-builder:latest build --help
 
       - name: Produce raw image (bootc-image-builder)
         # UNVERIFIED (docs/VERIFY.md): build/disk.toml's exact partition-
@@ -101,6 +109,15 @@ jobs:
         # lockbox) still need a verified build/disk.toml before M1, which
         # needs the lockbox to actually fit — tracked in docs/DECISIONS.md
         # and docs/VERIFY.md, not silently treated as done here.
+        # CI run 33325393238 got past the earlier "image not known" storage
+        # mismatch (D-A7) and reached real manifest generation, which then
+        # failed: "failed to initialize bootc distro: missing required info:
+        # DefaultRootFs". `--rootfs xfs` below is a best-effort attempt
+        # (Fedora's traditional root filesystem default), not a confirmed
+        # flag — the "Discover" step above now also captures `build --help`
+        # in full, so if this guess is wrong the real accepted flag/value is
+        # already in this same run's log for the next fix, not a second
+        # blind guess.
         run: |
           sudo podman run --rm \
             --privileged \
@@ -109,6 +126,7 @@ jobs:
             -v /var/lib/containers/storage:/var/lib/containers/storage \
             quay.io/centos-bootc/bootc-image-builder:latest \
             --type raw \
+            --rootfs xfs \
             localhost/friday-linux:testing
           ls -la output/
 
