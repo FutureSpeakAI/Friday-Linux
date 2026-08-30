@@ -186,6 +186,24 @@ to this file's earlier flag. Superseded: the `dnf repoquery` command listed
 above under "Fedora package availability for the §6/§8 BOM" is no longer
 needed; the real install is the stronger check and it passed.
 
+## 2026-08-30 — Fedora package names for the llama.cpp Vulkan build toolchain: UNVERIFIED
+
+`build/build-llama.sh` and the Containerfile's new `llama-build` stage need
+`git cmake gcc-c++ make vulkan-headers vulkan-loader-devel vulkan-tools
+glslc` on Fedora 44 to compile llama.cpp with `-DGGML_VULKAN=ON`. This list
+is a best-effort reading of llama.cpp's own Vulkan build docs, not confirmed
+against Fedora 44's actual repos from this sandbox (same standing
+limitation as every other package list in this file). In particular:
+`glslc` may not be Fedora's package name for the GLSL-to-SPIR-V compiler
+(shaderc ships it in some distros as `shaderc` or `glslang`) — if CI's
+`dnf install` fails on it, the fix is whatever `dnf provides '*/glslc'`
+reports, not a second guess.
+
+```sh
+dnf repoquery --available vulkan-headers vulkan-loader-devel vulkan-tools glslc shaderc glslang
+dnf provides '*/glslc'
+```
+
 ## Explicitly not verified, and not to be guessed
 
 - Whether the specific §13 upstream PRs have actually been opened/merged
