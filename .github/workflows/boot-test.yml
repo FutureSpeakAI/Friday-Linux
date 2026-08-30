@@ -1,47 +1,197 @@
-# Friday Linux — SPEC.md §16.2. Depends on ci/build.yml producing a raw
-# image, which is currently blocked (see that file's header). Structure
-# matches §16.2's description; the exact qemu invocation is a best-effort
-# reading of that section, not yet run anywhere.
+# Friday Linux — SPEC.md §16.2, M0 acceptance checklist (§15).
+#
+# ROOT CAUSE FOUND 2026-08-30 for the long-standing "workflow file issue /
+# zero jobs" failure (docs/VERIFY.md had it as an open, unexplained quirk
+# blamed on workflow_run timing): this file's earlier draft had several
+# single-line `run: echo "TODO: curl http://...:3000/api/health, poll for
+# boot_critical_ok"` steps. YAML treats an unquoted-at-the-mapping-level
+# scalar's "TODO:" (colon immediately followed by a space) as a NESTED
+# mapping key inside what is supposed to be a plain scalar value — genuinely
+# invalid YAML, not a GitHub bug. Confirmed by parsing the actual committed
+# blob with PyYAML: "mapping values are not allowed here, line 38 column
+# 24". GitHub silently registers a zero-job failed run tagged with whatever
+# event caused it to re-parse the file (a push, here) when a workflow file
+# fails to parse, which is exactly the symptom docs/VERIFY.md described.
+# Every multi-word `run:` value below is now either single-quoted or a `|`
+# block scalar, and this file's own YAML was validated locally with PyYAML
+# before being pushed. The trigger (workflow_run) was NOT the cause and was
+# never the problem — it is dropped below anyway, in favor of manual
+# workflow_dispatch, purely to avoid doubling CI cost on every push while
+# this workflow's own steps are still being iterated on (see the `on:`
+# block comment).
+#
+# DESIGN: rather than rebuilding the whole image again here (podman build
+# + the llama.cpp compile already takes ~20-50 minutes in build.yml), this
+# job PULLS the image build.yml already pushed to
+# ghcr.io/futurespeakai/friday-linux:testing and only re-runs
+# bootc-image-builder (a few minutes) to get a raw disk to boot. That keeps
+# each iteration of THIS file's own logic cheap.
 name: boot-test
 
 on:
-  workflow_run:
-    workflows: [build]
-    types: [completed]
+  # Deliberately workflow_dispatch only, not an automatic chain off `build`
+  # (via workflow_run or push): while this file's QEMU/OVMF/ESP-injection
+  # logic is still being iterated on, chaining would re-run a multi-minute
+  # job after every single push to main, including doc-only commits that
+  # do not change the image at all. Revisit once this file is stable
+  # (SPEC.md §16.2 does not mandate automatic chaining, only that the test
+  # exists and runs in CI).
   workflow_dispatch:
+    inputs:
+      image_ref:
+        description: 'Image to pull and boot-test'
+        required: false
+        default: 'ghcr.io/futurespeakai/friday-linux:testing'
 
 jobs:
   boot:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
     steps:
       - uses: actions/checkout@v4
 
       - name: Confirm KVM is available
+        # SPEC.md §16.2 asserts GitHub-hosted ubuntu-latest runners expose
+        # KVM. docs/VERIFY.md flagged this as historically true but worth a
+        # fresh smoke-test rather than trusted from the spec text alone.
         run: |
           ls -la /dev/kvm
-          # UNVERIFIED (docs/VERIFY.md): confirm this holds on current
-          # GitHub-hosted ubuntu-latest runners before relying on it.
+          [ -r /dev/kvm ] && [ -w /dev/kvm ]
+          echo "KVM device present and read/write accessible to this runner."
 
-      - name: Inject friday-unattended.yaml into ESP
+      - name: Install QEMU, OVMF, and gdisk on the runner
         run: |
-          echo "TODO: mount the raw image's ESP partition (loop device) and copy in a test friday-unattended.yaml (SPEC.md §7.6)"
+          sudo apt-get update -y
+          sudo apt-get install -y qemu-system-x86 qemu-utils ovmf gdisk
+          echo "--- OVMF firmware files actually installed ---"
+          dpkg -L ovmf | grep -i '\.fd$' || true
+
+      - name: Pull the built image into root's podman storage
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | sudo podman login ghcr.io -u "${{ github.actor }}" --password-stdin
+          sudo podman pull "${{ github.event.inputs.image_ref }}"
+
+      - name: Produce raw image (bootc-image-builder, same disk.toml as build.yml)
+        run: |
+          mkdir -p output
+          sudo podman run --rm \
+            --privileged \
+            --security-opt label=type:unconfined_t \
+            -v "$(pwd)/output:/output" \
+            -v "$(pwd)/build/disk.toml:/config.toml:ro" \
+            -v /var/lib/containers/storage:/var/lib/containers/storage \
+            quay.io/centos-bootc/bootc-image-builder:latest \
+            --type raw \
+            --rootfs xfs \
+            "${{ github.event.inputs.image_ref }}"
+          ls -la output/
+          sudo chmod 666 output/*.raw
+
+      - name: Grow the disk so the lockbox has real free space to claim
+        # SPEC.md §5/ADR-004: the lockbox is created at first boot on
+        # whatever free space exists on the boot device beyond the shipped
+        # image's own partitions (see build/disk.toml's header for why
+        # bootc-image-builder itself has no "leave N GiB free" primitive).
+        # +4G here is an arbitrary CI-only choice, large enough to hold a
+        # small btrfs+LUKS2 lockbox with real headroom, small enough not to
+        # meaningfully slow the boot test down.
+        run: |
+          RAW="$(find output -name '*.raw' | head -1)"
+          echo "raw=${RAW}" >> "$GITHUB_ENV"
+          qemu-img resize -f raw "${RAW}" +4G
+          # sgdisk -e relocates the GPT backup header/table to the new end
+          # of the file — required after growing a raw GPT disk image, or
+          # tools see a corrupt-looking backup header at the old (now
+          # wrong) end-of-disk location instead of real trailing free space.
+          sudo sgdisk -e "${RAW}"
+          sudo sgdisk -p "${RAW}"
+
+      - name: Inject friday-unattended.yaml into the ESP partition
+        # SPEC.md §7.6. Partition numbering confirmed from the real
+        # bootc-image-builder output captured in build.yml's own CI log
+        # (CI run 33328948151): p1 is the BIOS-boot partition (GPT type
+        # 21686148-...), p2 is the ESP (type C12A7328-...), p3 is /boot,
+        # p4 is /. Loop-mounting p2 directly rather than guessing p1.
+        run: |
+          LOOP="$(sudo losetup -fP --show "${raw}")"
+          echo "loop=${LOOP}" >> "$GITHUB_ENV"
+          sudo partprobe "${LOOP}" || sudo blockdev --rereadpt "${LOOP}" || true
+          sleep 1
+          sudo mkdir -p /mnt/esp
+          sudo mount "${LOOP}p2" /mnt/esp
+          cat <<'YAML' | sudo tee /mnt/esp/friday-unattended.yaml > /dev/null
+          lockbox:
+            passphrase: "friday-linux-ci-boot-test-passphrase-not-a-real-secret"
+          YAML
+          ls -la /mnt/esp/
+          sudo umount /mnt/esp
+          sudo losetup -d "${LOOP}"
 
       - name: Boot under QEMU/KVM with OVMF
+        # SPEC.md §16.2: 8 GB RAM, OVMF, hostfwd for /api/health. The
+        # hostfwd target is guest port 3001 (friday-boot-test-relay.service),
+        # not 3000 — see that unit's header comment for why a plain hostfwd
+        # cannot reach a service bound to 127.0.0.1 inside the guest.
         run: |
-          echo "TODO per SPEC.md §16.2: qemu-system-x86_64 -M q35 -accel kvm -m 8G -bios OVMF.fd \\"
-          echo "  -drive file=friday-linux.raw,format=raw \\"
-          echo "  -drive file=second-disk.img,format=raw \\"
-          echo "  -nic user,hostfwd=tcp::3000-:3000"
-          exit 1  # deliberately fails: not yet implemented
+          OVMF_CODE="$(dpkg -L ovmf | grep -m1 'OVMF_CODE\.fd$')"
+          OVMF_VARS_SRC="$(dpkg -L ovmf | grep -m1 'OVMF_VARS\.fd$')"
+          cp "${OVMF_VARS_SRC}" /tmp/OVMF_VARS.fd
+          echo "ovmf_code=${OVMF_CODE}" >> "$GITHUB_ENV"
+          sudo qemu-system-x86_64 \
+            -M q35 -accel kvm -cpu host -smp 2 -m 8192 \
+            -drive if=pflash,format=raw,readonly=on,file="${OVMF_CODE}" \
+            -drive if=pflash,format=raw,file=/tmp/OVMF_VARS.fd \
+            -drive file="${raw}",format=raw,if=virtio \
+            -netdev user,id=net0,hostfwd=tcp::3000-:3001 \
+            -device virtio-net-pci,netdev=net0 \
+            -serial file:/tmp/console.log \
+            -display none \
+            -daemonize -pidfile /tmp/qemu.pid
+          sleep 2
+          echo "qemu pid: $(cat /tmp/qemu.pid)"
 
-      - name: Assert /api/health within 300s
-        run: echo "TODO: curl http://127.0.0.1:3000/api/health, poll for boot_critical_ok"
+      - name: Wait for /api/health within 300s
+        # Amendment A1 (SPEC.md): M0 accepts HTTP 200 alone; the
+        # boot_critical_ok JSON field is a PR-6/M2 gate, not M0's.
+        run: |
+          DEADLINE=$((SECONDS + 300))
+          until curl -fsS --max-time 3 -o /tmp/health.json http://127.0.0.1:3000/api/health; do
+            if (( SECONDS > DEADLINE )); then
+              echo "::error::/api/health did not return 2xx within 300s"
+              exit 1
+            fi
+            sleep 5
+          done
+          echo "/api/health responded within ${SECONDS}s:"
+          cat /tmp/health.json
 
-      - name: Assert sealed /usr
-        run: echo "TODO: over SSH or serial console, confirm 'touch /usr/x' fails"
+      - name: Give the boot-test probe time to run, then shut down
+        run: |
+          sleep 20
+          sudo qemu-system-x86_64 -version > /dev/null  # no-op sanity
+          if [ -f /tmp/qemu.pid ] && kill -0 "$(cat /tmp/qemu.pid)" 2>/dev/null; then
+            sudo kill "$(cat /tmp/qemu.pid)"
+            sleep 3
+          fi
 
-      - name: Assert lockbox layout (G3)
-        run: echo "TODO: confirm LUKS2 + Argon2id + five subvolumes"
+      - name: Show the captured console log (bootc status, /usr write test)
+        if: always()
+        run: |
+          echo "--- full console.log ---"
+          sudo cat /tmp/console.log || echo "no console.log captured"
+          echo "--- FRIDAY-BOOT-TEST-PROBE block only ---"
+          sudo sed -n '/FRIDAY-BOOT-TEST-PROBE-BEGIN/,/FRIDAY-BOOT-TEST-PROBE-END/p' /tmp/console.log || true
 
-      - name: Assert no-trace on second disk (G2)
-        run: echo "TODO: SHA-256 the second disk's partition table + first 64 MiB of each partition before/after; assert identical"
+      - name: Assert /usr is read-only, from the probe output
+        run: |
+          sudo grep -q 'USR_WRITABLE=no' /tmp/console.log
+
+      - name: Upload console log as a CI artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: boot-test-console-log
+          path: /tmp/console.log
+          retention-days: 14

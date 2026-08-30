@@ -56,6 +56,20 @@ FROM registry.fedoraproject.org/fedora-bootc:44@sha256:e8f93cc9b1a0089216c674d5d
 # ── System packages (§6 "System") ────────────────────────────────────────
 # Package names are UNVERIFIED against Fedora repos — see docs/VERIFY.md
 # "Fedora package availability." `caddy` in particular may need a COPR.
+#
+# Two additions beyond §6's literal list, both needed for the first-boot
+# wizard's real M0 implementation (image/firstboot/wizard.py), recorded in
+# docs/DECISIONS.md rather than silently added:
+# - `gdisk` (provides `sgdisk`): §5/ADR-004 say the lockbox partition is
+#   created "at first boot" on whatever free space exists beyond the
+#   shipped image's own partitions; sgdisk is the scriptable way to add
+#   that GPT partition without a human running `parted` interactively.
+# - `python3-pyyaml`: image/firstboot/wizard.py parses friday-unattended.yaml
+#   (§7.6) before friday.service (and therefore the app's own venv) exists,
+#   so it needs its own YAML parser. The app venv is not on this script's
+#   path by design (it should not depend on Agent-Friday's own dependency
+#   set), so this is a small, torch-free, system-level addition — not a
+#   §0 rule 7 concern.
 RUN dnf install -y \
         linux-firmware \
         mesa-vulkan-drivers vulkan-loader vulkan-tools \
@@ -67,11 +81,30 @@ RUN dnf install -y \
         chromium \
         caddy \
         greenboot \
-        cryptsetup btrfs-progs \
+        cryptsetup btrfs-progs gdisk \
+        python3-pyyaml \
         google-noto-sans-fonts google-noto-emoji-color-fonts google-noto-sans-cjk-fonts \
     && dnf clean all
 
 # avahi and cups are P1 (§6, §8.7) — not installed in v1.
+
+# ── The `friday` user (§8.1, §5 mount plan) ──────────────────────────────
+# Genuinely missing from every prior pass: friday.service, friday-caddy.service
+# and friday-kiosk.service all specify User=friday/Group=friday, but nothing
+# in this repo ever created that user or group — `systemctl start
+# friday.service` would fail immediately at boot with "user friday does not
+# exist," before any of §8's ReadWritePaths/DeviceAllow sandboxing even
+# matters. Found by reading the units against the Containerfile, not by a
+# CI failure yet — fixed here rather than waiting for the boot test to
+# discover it the hard way. `-m` creates /home/friday now (build time); it
+# is later shadowed by the lockbox's @home subvolume once the first-boot
+# wizard mounts it there (normal, expected: the mountpoint's prior contents
+# become invisible under the mount, not deleted). Supplementary groups match
+# friday.service's SupplementaryGroups= line (§8.1); `video`/`render` exist
+# in the base image via Mesa, `audio` via PipeWire.
+RUN useradd --create-home --home-dir /home/friday --shell /bin/bash \
+        --groups video,render,audio friday \
+    && passwd -l friday
 
 # ── Build-time-only tooling for the venv-install step below ──────────────
 # `git` (to clone Agent-Friday at the pin) and `uv` (to create the venv) are
@@ -206,6 +239,8 @@ COPY image/systemd/friday-lockbox.mount        /usr/lib/systemd/system/friday-lo
 COPY image/systemd/friday-caddy.service        /usr/lib/systemd/system/friday-caddy.service
 COPY image/systemd/friday-kiosk.service        /usr/lib/systemd/system/friday-kiosk.service
 COPY image/systemd/friday-firstboot.service    /usr/lib/systemd/system/friday-firstboot.service
+COPY image/systemd/friday-boot-test-probe.service  /usr/lib/systemd/system/friday-boot-test-probe.service
+COPY image/systemd/friday-boot-test-relay.service  /usr/lib/systemd/system/friday-boot-test-relay.service
 COPY image/etc/friday/os.env                   /etc/friday/os.env
 COPY image/greenboot/required.d/               /etc/greenboot/check/required.d/
 COPY image/chromium/policies/managed/friday.json /etc/chromium/policies/managed/friday.json
@@ -215,12 +250,39 @@ COPY image/polkit/                             /etc/polkit-1/rules.d/
 COPY image/sudoers.d/friday-os-helper          /etc/sudoers.d/friday-os-helper
 COPY image/firstboot/                          /usr/share/friday/firstboot/
 COPY image/splash/                             /usr/share/friday/splash/
+COPY image/scripts/boot-test-relay.py          /usr/libexec/friday/boot-test-relay.py
 COPY helper/friday-os-helper/                  /usr/libexec/friday/
 
+# friday-kiosk.service is deliberately NOT enabled at M0: the milestone's own
+# scope (SPEC.md §15) puts the real cage+Chromium kiosk experience at M1
+# ("First-boot wizard, kiosk, rollback"), and its Caddyfile/TLS chain is
+# still a first-draft (docs/DECISIONS.md). The unit is still installed
+# (present, disabled) so M1 only has to `systemctl enable` it — the same
+# "installed but disabled" pattern §10.2 already uses for sshd. Its
+# greenboot check (40-kiosk.sh) is expected to fail at M0 for the same
+# reason; not chased here, since M0's own acceptance list (SPEC.md §15) does
+# not require it and greenboot's rollback path only bites established/staged
+# deployments, not this image's first-ever boot (recorded in
+# docs/VERIFY.md — genuinely unverified from this sandbox either way).
+#
+# friday-boot-test-probe.service and friday-boot-test-relay.service are new,
+# not named in SPEC.md: both are ConditionPathExists-gated on
+# /var/lib/friday/.provisioned-unattended (written only by the wizard when it
+# actually consumes a friday-unattended.yaml — i.e., only in unattended/CI
+# provisioning, never on a normal interactive install), so they are always
+# enabled but are a silent, zero-cost no-op on every real deployment. See
+# their own file headers and docs/DECISIONS.md for why they exist: M0's
+# acceptance checklist (SPEC.md §15) needs to observe `bootc status`, a
+# `/usr` write-test, and reach /api/health from OUTSIDE the guest in a
+# headless GitHub Actions QEMU boot with no SSH server enabled (§10.2) and
+# friday.service bound to loopback only (§8.1) — this is how that observation
+# happens without adding any permanent, always-on attack surface.
 RUN systemctl enable friday-lockbox.mount friday.service friday-caddy.service \
-        friday-kiosk.service friday-firstboot.service nftables.service \
+        friday-firstboot.service friday-boot-test-probe.service \
+        friday-boot-test-relay.service nftables.service \
     && chmod 440 /etc/sudoers.d/friday-os-helper \
     && chmod 0755 /usr/libexec/friday/friday-os-helper \
+    && chmod 0755 /usr/libexec/friday/boot-test-relay.py \
     && chmod 0755 /usr/share/friday/firstboot/wizard.py \
     && chmod 0755 /etc/greenboot/check/required.d/*.sh
 # Executable bits above are set explicitly rather than relied on from the

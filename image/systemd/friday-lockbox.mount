@@ -29,7 +29,17 @@
 [Unit]
 Description=Friday lockbox (LUKS2 + btrfs top-level volume)
 Before=friday.service
-RequiresMountsFor=/dev/mapper/friday-lockbox
+# Deviation from the previous draft (docs/DECISIONS.md): RequiresMountsFor
+# expects a PATH that some OTHER mount provides, not a /dev node — it does
+# not do what the comment above used to claim ("wait until this device node
+# appears"). The correct systemd idiom for that is a dependency on the
+# auto-generated .device unit for a udev-visible node: systemd escapes
+# "/dev/mapper/friday-lockbox" into the unit name
+# "dev-mapper-friday\x2dlockbox.device". BindsTo+After means this mount is
+# torn down if that device disappears, and does not even attempt to start
+# before it exists.
+BindsTo=dev-mapper-friday\x2dlockbox.device
+After=dev-mapper-friday\x2dlockbox.device
 
 [Mount]
 What=/dev/mapper/friday-lockbox

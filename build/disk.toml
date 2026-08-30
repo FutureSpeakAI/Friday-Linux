@@ -1,0 +1,52 @@
+# Friday Linux — SPEC.md §5 (storage layout), §14 (build/disk.toml).
+#
+# RESOLVED 2026-08-30 (docs/VERIFY.md): bootc-image-builder's disk
+# customization file is mounted into the build container at the fixed path
+# /config.toml (no --config flag exists — confirmed against `build --help`,
+# which lists no such flag, and against the real, current
+# osbuild/images:bootc-image-builder/README.md, fetched live rather than
+# recalled from memory). Its schema is `[[customizations.filesystem]]`
+# entries with `mountpoint` and `minsize`; only "/" and "/boot" (base
+# partitions) and subdirectories of "/var" (extra partitions) are
+# supported — verbatim from that README: "The filesystem section of the
+# customizations can be used to set the minimum size of the base
+# partitions (/ and /boot) as well as to create extra partitions with
+# mountpoints under /var."
+#
+# What this DOES give us: a real, fixed 16 GiB root (SPEC.md §5's "16 GiB
+# fixed root") instead of the previous build's behavior (no disk.toml at
+# all), which let bootc-image-builder size root to fit actual content
+# (~9.57 GiB in the last measured build, CI run 33328948151) — i.e. NOT
+# fixed, and NOT leaving deliberate headroom for two ostree deployments
+# (SPEC.md §6: "two deployments share ostree objects, so the 16 GiB root
+# has headroom"). A 1 GiB /boot matches SPEC.md §5's boot partition line.
+#
+# What this does NOT give us, confirmed absent from bootc-image-builder's
+# documented customization surface (not guessed — checked the real docs):
+# - No independent ESP size control. SPEC.md §5 wants 512 MiB; the last
+#   real build's own partition table (CI run 33328948151) already measured
+#   the ESP at 1026048 sectors * 512 B ~= 501 MiB — close enough to 512 MiB
+#   that this is recorded as "matches, not independently configurable"
+#   rather than chased further.
+# - No "leave N GiB of raw unpartitioned free space at the end of the disk
+#   for something to claim later" primitive. bootc-image-builder sizes the
+#   disk image to exactly fit ESP + boot + root (+ any /var/* extra
+#   partitions) with minsize floors — there is no fourth "lockbox" partition
+#   in the SHIPPED image itself.
+#
+# Consequence, recorded in docs/DECISIONS.md: ADR-004's "lockbox created at
+# first boot on the remaining space of the boot device" is read literally —
+# the remaining space comes from the boot DEVICE being larger than the
+# shipped image's own on-disk footprint (a real USB stick vs. this ~17.5
+# GiB image, or in CI, an intentionally oversized QEMU raw disk file), not
+# from a partition baked into the image by bootc-image-builder. The
+# first-boot wizard (image/firstboot/wizard.py) detects and claims that
+# real trailing free space with sgdisk at first boot, exactly as ADR-004
+# already says happens "at first boot," not at build time.
+[[customizations.filesystem]]
+mountpoint = "/"
+minsize = "16 GiB"
+
+[[customizations.filesystem]]
+mountpoint = "/boot"
+minsize = "1 GiB"

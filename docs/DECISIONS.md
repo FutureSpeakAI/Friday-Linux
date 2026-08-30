@@ -461,6 +461,184 @@ silently made, for each place the spec's text couldn't be used verbatim.
   meant to hold anything else non-workflow-shaped later (it currently holds
   nothing), that's unaffected by this move.
 
+- **Deviation D-A9: root cause of `boot-test.yml`'s long-standing "workflow
+  file issue / zero jobs" failure found and fixed — it was invalid YAML,
+  not a `workflow_run` timing quirk.** `docs/VERIFY.md`'s entry on this
+  ("Unresolved CI quirk") had guessed at `workflow_run` ordering and left it
+  unchased since every step downstream was a placeholder anyway. Parsing
+  the actual committed file with PyYAML (`yaml.safe_load`) reproduces the
+  failure locally: `mapping values are not allowed here, line 38 column
+  24`. Cause: several steps used a single-line `run: echo "TODO: curl
+  http://...` form. YAML only treats the text after `run:` as a literal
+  string when the whole thing is a `|`/`>` block scalar or is itself
+  quoted at the mapping-value level; a bare `run: echo "TODO: ..."` is a
+  *plain* scalar from YAML's point of view, and a plain scalar containing
+  `: ` (colon-space) mid-string — "TODO: curl" — is parsed as a nested
+  mapping key, which is illegal inside an already-open scalar context.
+  GitHub Actions does not surface this as a normal step failure because
+  the file never parses far enough to produce any jobs at all; it instead
+  registers a zero-job failed run tagged with whatever event triggered the
+  re-parse (a `push`, in every observed case — confirmed via `gh api
+  .../actions/runs/<id>`, which reported `"event":"push"` even though the
+  file's only real triggers were `workflow_run`/`workflow_dispatch`). Fixed
+  by rewriting every `run:` value as either single-quoted or a `|` block
+  scalar, and validating the file with PyYAML locally before pushing —
+  now part of this session's own process for any workflow-file edit, not
+  just this one fix.
+
+- **Deviation D-A10: `build/disk.toml` written using the real,
+  live-fetched bootc-image-builder schema, not a plausible guess.** Per
+  `docs/VERIFY.md`'s standing question, fetched the actual current
+  `osbuild/images` `bootc-image-builder/README.md` (that repo now hosts
+  the canonical source; the older standalone `osbuild/bootc-image-builder`
+  repo's README matches only partially) rather than recalling a schema
+  from training data. Confirmed: the config file is mounted at the fixed
+  container path `/config.toml` (no `--config` CLI flag exists — absent
+  from `build --help`'s real captured output too); the only customization
+  primitive is `[[customizations.filesystem]]` with `mountpoint` +
+  `minsize`, and it is documented as covering *only* `/`, `/boot`, and
+  subdirectories of `/var` — there is no primitive for an independent ESP
+  size or for "leave N GiB of raw unpartitioned space at the end of the
+  disk." `build/disk.toml` sets `minsize = "16 GiB"` for `/` and `"1 GiB"`
+  for `/boot`, matching SPEC.md §5's fixed-root intent as closely as the
+  tool allows. Consequence, recorded so ADR-004 isn't silently
+  reinterpreted: the lockbox's "remaining space on the boot device" comes
+  from the *device being larger than the shipped image's own footprint*
+  (a real USB stick, or in CI, a deliberately grown QEMU raw disk file),
+  never from a partition baked into the image itself — this was already
+  ADR-004's literal wording ("created at first boot"), just confirmed here
+  as the *only* way it can work given bootc-image-builder's real, checked
+  feature set, not a design choice this session introduced.
+
+- **Deviation D-A11: created the `friday` Linux user/group — missing
+  entirely from every prior pass.** `friday.service`, `friday-caddy.service`,
+  and `friday-kiosk.service` all specify `User=friday`/`Group=friday`
+  (copied verbatim from SPEC.md §8.1/§8.2/§8.3), but nothing in this repo's
+  Containerfile ever ran `useradd`. `systemctl start friday.service` would
+  have failed at the very first boot with "user friday does not exist,"
+  before any of the mount/health logic mattered at all. Found by reading
+  the units against the Containerfile while preparing the M0 boot test,
+  not by a CI failure (fixed proactively). Added `useradd --create-home
+  --home-dir /home/friday --shell /bin/bash --groups
+  video,render,audio friday` plus `passwd -l friday` (locked password — no
+  interactive login path exists or is needed at M0; §7.3 step 8's "set the
+  friday user's password" is M1 wizard scope).
+
+- **Deviation D-A12: `friday-lockbox.mount`'s device dependency corrected
+  from `RequiresMountsFor=/dev/mapper/friday-lockbox` to
+  `BindsTo=`/`After=dev-mapper-friday\x2dlockbox.device`.** The previous
+  draft's own header comment claimed `RequiresMountsFor` would "wait until
+  this device node appears," which is not what that directive does — it
+  expects a *path provided by some other mount*, not a `/dev` node.
+  Systemd's real idiom for "order after / bind to a udev-visible device
+  node" is a dependency on the auto-generated `.device` unit for that
+  node's escaped path. Fixed while implementing image/firstboot/wizard.py's
+  real `create_lockbox()`, which needs this unit to actually mount when
+  started right after `cryptsetup open`, not silently no-op or hang on a
+  directive that never resolves.
+
+- **Challenge (not a Deviation — flagged per rule 2, not silently
+  resolved): `/var/lib/friday/secrets.env`'s real location does not match
+  SPEC.md §8.1's stated security property.** §8.1 calls the file
+  "(lockbox, mode 0600, owner friday)" and states "the human has one
+  passphrase (the lockbox); the app's own vault and session keys are
+  random and protected by the lockbox." But the file's given path,
+  `/var/lib/friday/secrets.env`, is not on any of SPEC.md §5's five lockbox
+  subvolumes — only `/var/lib/friday/models` and `/var/lib/friday/workshop`
+  are lockbox-mounted subpaths; `/var/lib/friday/` itself is the sealed
+  OS's own persistent `/var` (ostree does not wipe `/var` between
+  deployments, so the file does survive updates, but it is protected only
+  by the root filesystem's own permissions, not LUKS2 encryption). As
+  implemented (`image/firstboot/wizard.py:write_secrets_env`), the file is
+  created exactly where §8.1 says, generating random `FRIDAY_PASSWORD`/
+  `FRIDAY_SECRET_KEY` — but the "protected by the lockbox" claim is not
+  actually true for it. Fixing this for real means either extending §5's
+  mount plan (a new subvolume or a bind-mount reaching into `/var/lib/
+  friday` itself) or moving the file under `/home/friday` (already
+  lockbox-backed via `@home`) — both are SPEC.md §5 changes, not something
+  this executor resolves unilaterally. Flagged for Stephen; M0 proceeds
+  with the file where §8.1 literally puts it, since M0's own acceptance
+  checklist only requires the lockbox to exist with its five subvolumes,
+  not this specific property.
+
+- **Deviation D-A13: added `friday-boot-test-probe.service` and
+  `friday-boot-test-relay.service` — not named anywhere in SPEC.md.** Both
+  exist solely to make M0's acceptance checklist (SPEC.md §15) observable
+  from a headless GitHub Actions QEMU boot test with no SSH server enabled
+  (§10.2 — installed but disabled, no host keys) and `friday.service` bound
+  to loopback only (§8.1). The relay solves reaching `/api/health` from
+  outside the guest (a plain QEMU `hostfwd` cannot reach a loopback-only
+  bound service — see the unit's own header). The probe solves observing
+  `bootc status` and a `/usr` write-test, neither of which is exposed by
+  any HTTP API at M0 (PR-10's `/api/os/status` is M4 scope). Both are
+  gated by `ConditionPathExists=/var/lib/friday/.provisioned-unattended`, a
+  marker the wizard writes *only* when it actually consumes a real
+  `friday-unattended.yaml` (i.e., unattended/CI provisioning) — never on a
+  normal interactive install — so both are a single, cheap condition check
+  and otherwise complete no-ops on every real deployment. Neither opens a
+  network listener beyond the CI-only relay's own unprivileged port 3001,
+  and neither is reachable unless this exact marker file already exists.
+
+- **Deviation D-A14: `friday-kiosk.service` is installed but not
+  `systemctl enable`d at M0.** The real cage+Chromium kiosk experience is
+  explicit M1 scope (SPEC.md §15: "M1: First-boot wizard, kiosk,
+  rollback"), and its TLS chain (`image/caddy/Caddyfile`) is still a
+  first-draft per this file's own earlier entry. Enabling a unit that is
+  very likely to fail its own greenboot check (`40-kiosk.sh`) on every M0
+  boot adds risk (retry-looping, a possibly-noisy journal, an unclear
+  interaction with greenboot's rollback logic on a system with no kiosk
+  wizard steps 1-3/5-9 yet) for zero M0 benefit — M0's own acceptance
+  checklist (SPEC.md §15) does not mention the kiosk. Left present,
+  disabled, matching the same pattern §10.2 already uses for `sshd`; M1
+  only has to flip it on.
+
+- **Decision: `build/agent-friday.lock` is not written, and will not be
+  under Amendment A1's current install path.** SPEC.md §14 names it as a
+  "uv lockfile for the app venv," and §6 says the venv is "installed from
+  a lockfile committed in this repo." That describes PR-3's landed state:
+  `pip install "agent-friday @ git+...@<tag>"` resolving against a
+  committed `uv.lock`. Amendment A1's actual M0 mechanism is different and
+  incompatible with that model: the Containerfile `git clone`s the full
+  repository at the pin and runs `uv pip install -e "<clone>[extras]"` —
+  an **editable** install of a **local path**, not a package install from
+  a git URL. `uv lock` / `uv pip compile` for an editable local-path
+  install would lock the same `pyproject.toml` dependency *ranges* that
+  are already being resolved fresh at every build anyway; the output would
+  not pin anything not already pinned by `build/agent-friday.pin` (the git
+  tag itself) plus whatever `uv` resolves against PyPI at build time — the
+  same non-reproducibility SPEC.md's own lockfile requirement exists to
+  close, since a fresh `uv pip install -e` with no lockfile can resolve
+  different transitive versions on different days even at the same pinned
+  tag. A real fix (generating a `requirements.txt`-style lock from the
+  pin's `pyproject.toml` via `uv pip compile` and having the Containerfile
+  install from *that* instead of a bare `-e` install) is a genuine
+  improvement worth doing, but changes the install mechanism itself
+  (mixing an editable install with a separately-locked dependency set is
+  not a one-line addition) and was not attempted this pass to avoid
+  destabilizing the now-green `build.yml` while the M0 boot test was the
+  session's primary focus. Recorded here as a real, open decision rather
+  than left silently unresolved a second time: **not written now; revisit
+  when `build/agent-friday.pin` moves to a post-PR-3 tag** (PR-3 makes the
+  install-from-git-tag path SPEC.md originally assumed real, at which
+  point a genuine `uv.lock` is both meaningful and straightforward), or
+  sooner if reproducibility problems from the unlocked `-e` install
+  actually surface in CI.
+
+- **Deviation D-A15 (workaround, not a spec deviation to Agent-Friday's
+  own code): `image/firstboot/wizard.py` pre-seeds
+  `/home/friday/.friday/.setup_complete`.** Read `cli.py` at the pinned
+  tag (`v5.7.0`, via the real `friday-desktop` checkout, not guessed):
+  `friday` with no arguments runs `cmd_start()`, which calls
+  `_is_existing_user()` and, if false, calls `rich.prompt.Confirm.ask(...)`
+  — an interactive prompt with no fallback for a non-tty `stdin`.
+  `friday.service` runs under systemd with no terminal attached, so this
+  would either hang or raise `EOFError` on every first start, since
+  nothing else pre-creates that marker before PR-2/PR-7 land (PR-7's
+  `/api/setup/os-handoff` is the real, upstream fix for this exact
+  problem, per SPEC.md §13 — it is M4-ordered work, not available at M0).
+  This is an Amendment-A1-era workaround, not a permanent fixture: it goes
+  away the moment PR-7 lands and the app itself understands OS mode.
+
 - **Executable bits are set in the Containerfile, not relied on from git.**
   Confirmed via `git ls-files -s` after committing: every file this repo
   tracks landed as mode `100644`, including the `.sh` scripts and the

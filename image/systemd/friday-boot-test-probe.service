@@ -1,0 +1,48 @@
+# Friday Linux — NOT in SPEC.md; added this pass to make M0's acceptance
+# checklist (SPEC.md §15) actually checkable from GitHub Actions CI.
+#
+# M0's checklist needs to observe two things from OUTSIDE the guest with no
+# SSH server available (§10.2): "`bootc status` shows one deployment" and
+# "/usr is read-only (`touch /usr/x` fails)". This unit runs both checks
+# once, at boot, and writes the results to the console (ttyS0 under QEMU,
+# captured on the host side via `-serial file:...` in
+# .github/workflows/boot-test.yml) — the same headless-CI technique as
+# friday-boot-test-relay.service, gated the same way (see that unit's
+# header) so it is a silent no-op on every real deployment.
+#
+# StandardOutput=journal+console is scoped to just this one-shot unit, not
+# to friday.service or friday-firstboot.service — neither of those needed
+# to change to make this observable.
+[Unit]
+Description=Friday Linux CI-only boot probe: bootc status + /usr write test (see header)
+ConditionPathExists=/var/lib/friday/.provisioned-unattended
+After=friday-firstboot.service multi-user.target
+Wants=friday-firstboot.service
+
+[Service]
+Type=oneshot
+StandardOutput=journal+console
+StandardError=journal+console
+ExecStart=/bin/sh -c '\
+  echo "FRIDAY-BOOT-TEST-PROBE-BEGIN"; \
+  echo "--- bootc status ---"; \
+  bootc status --json 2>&1; \
+  echo "--- /usr write test ---"; \
+  if touch /usr/.friday-boot-test-writeprobe 2>/tmp/usr-write.err; then \
+    echo "USR_WRITABLE=yes (unexpected — /usr should be read-only)"; \
+    rm -f /usr/.friday-boot-test-writeprobe; \
+  else \
+    echo "USR_WRITABLE=no ($(cat /tmp/usr-write.err))"; \
+  fi; \
+  echo "--- findmnt /usr ---"; \
+  findmnt -no SOURCE,TARGET,FSTYPE,OPTIONS /usr 2>&1; \
+  echo "--- findmnt /boot/efi ---"; \
+  findmnt -no SOURCE,TARGET,FSTYPE,OPTIONS /boot/efi 2>&1; \
+  echo "--- lockbox subvolumes (btrfs subvolume list) ---"; \
+  btrfs subvolume list /run/friday-lockbox 2>&1; \
+  echo "--- lsblk ---"; \
+  lsblk -o NAME,TYPE,FSTYPE,SIZE,MOUNTPOINT 2>&1; \
+  echo "FRIDAY-BOOT-TEST-PROBE-END"'
+
+[Install]
+WantedBy=multi-user.target

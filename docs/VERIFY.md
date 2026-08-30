@@ -248,6 +248,80 @@ podman run --rm quay.io/centos-bootc/bootc-image-builder:latest --help
 # examples found elsewhere, since the schema has changed across releases.
 ```
 
+## 2026-08-30 — `boot-test.yml`'s "workflow file issue" quirk: RESOLVED, real root cause
+
+Superseded: the entry below ("Unresolved CI quirk") guessed at
+`workflow_run` timing and left it unchased. Actual cause, confirmed by
+parsing the committed file locally with PyYAML: several `run: echo "TODO:
+..."` single-line steps are invalid YAML (a plain scalar containing
+`: ` mid-string is parsed as a nested mapping key). See
+`docs/DECISIONS.md` Deviation D-A9 for the full explanation and fix. The
+`workflow_run` trigger was never the problem.
+
+## 2026-08-30 — bootc-image-builder disk customization schema: RESOLVED via live docs fetch
+
+```sh
+# What was actually run (via WebFetch, since this sandbox has no
+# podman/bootc-image-builder to run --help-config against directly):
+# fetched raw.githubusercontent.com/osbuild/bootc-image-builder/main/README.md
+# and gh api repos/osbuild/images/contents/bootc-image-builder/README.md
+# (the current canonical source — the two repos' READMEs partially diverge;
+# the osbuild/images one is newer/authoritative).
+```
+Confirmed: config is mounted at the fixed path `/config.toml` (no
+`--config` flag — matches `build --help`'s real captured output, which
+lists no such flag). Schema is `[[customizations.filesystem]]` with
+`mountpoint`/`minsize`, covering only `/`, `/boot`, and `/var/*`
+subdirectories — verbatim from the README: "The filesystem section of the
+customizations can be used to set the minimum size of the base partitions
+(`/` and `/boot`) as well as to create extra partitions with mountpoints
+under `/var`." No ESP-size customization and no "leave free space at the
+end of the disk" primitive exist in this schema — see
+`docs/DECISIONS.md` Deviation D-A10 for the consequence for ADR-004.
+`build/disk.toml` is now written using this real schema, not a guess.
+
+## 2026-08-30 — GitHub-hosted `ubuntu-latest` runner KVM availability
+
+`.github/workflows/boot-test.yml`'s "Confirm KVM is available" step is the
+real smoke test SPEC.md §16.2 asked for (`ls -la /dev/kvm` plus a
+read/write check), run for real rather than trusted from the spec's own
+assertion. Result to be recorded here from the first real `boot-test.yml`
+run once dispatched — not filled in speculatively.
+
+## 2026-08-30 — ESP mount path assumption in `image/firstboot/wizard.py`
+
+`wizard.py` assumes the ESP is mounted at `/boot/efi` at runtime (standard
+GRUB2-EFI convention on Fedora) — not independently confirmed against this
+exact bootc/ostree layout from this sandbox. The boot-test probe unit
+(`friday-boot-test-probe.service`) runs `findmnt -no
+SOURCE,TARGET,FSTYPE,OPTIONS /boot/efi` specifically so the real answer
+shows up in the console log the first time this actually boots, rather
+than being assumed silently.
+
+## 2026-08-30 — real root-partition-vs-`/` distinction on this ostree/bootc layout
+
+`image/firstboot/wizard.py:find_root_disk()` assumes `/sysroot` (not `/`)
+is where the real backing block device is mounted on an ostree/bootc
+system — `/` itself is a composefs/overlay view of one deployment inside
+that sysroot, not the physical partition. Not independently confirmed
+against this exact image's boot layout from this sandbox; the function
+tries `/sysroot` first and falls back to `/` if that lookup fails, and its
+own `_log()` calls record which path resolved in the console log the boot
+test captures.
+
+## 2026-08-30 — `bootc status --json` schema: not yet observed for real
+
+M0's acceptance line "`bootc status` shows one deployment" needs a real,
+parseable assertion eventually, but this session deliberately did not
+guess `bootc status --json`'s exact field names/shape (an object with a
+`status` key? a bare array of deployments? a `booted`/`staged`/`rollback`
+triple?) per rule 5. `friday-boot-test-probe.service` captures the real
+`bootc status --json` output verbatim to the console log; `boot-test.yml`
+currently just displays it (search the console log / uploaded
+`boot-test-console-log` artifact for `FRIDAY-BOOT-TEST-PROBE-BEGIN`). A
+follow-up commit should encode a precise `jq`-based assertion once the
+real shape has actually been seen in a CI run, not before.
+
 ## Explicitly not verified, and not to be guessed
 
 - Whether the specific §13 upstream PRs have actually been opened/merged

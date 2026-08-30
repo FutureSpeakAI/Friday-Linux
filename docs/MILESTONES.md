@@ -250,6 +250,54 @@ green (CI run 33328948151, see above) — items (1)-(3) below are DONE:**
    `docs/DECISIONS.md` on whether a lockfile is meaningful under A1's
    approach or should be explicitly skipped.
 
+**2026-08-30, new execution pass: `build/disk.toml` written, the `friday`
+user (missing entirely — a real bug) created, `boot-test.yml`'s actual
+root cause found and fixed, and `image/firstboot/wizard.py` given a real
+implementation.** Not yet confirmed by a fresh CI run at the time this
+paragraph was written — see `docs/DECISIONS.md` Deviations D-A9 through
+D-A15 for the full list of what changed and why:
+- `build/disk.toml` now exists, using the real bootc-image-builder schema
+  (confirmed via a live docs fetch, not memory) — `minsize=16GiB` for `/`,
+  `1GiB` for `/boot`. `build.yml`'s "Produce raw image" step now mounts it.
+- The `friday` Linux user/group did not exist anywhere in this repo before
+  this pass — `friday.service` would have failed at the first boot with
+  "user does not exist." Fixed in the Containerfile.
+- `boot-test.yml`'s long-standing "workflow file issue / zero jobs"
+  failure (previously blamed on `workflow_run` timing) was actually
+  invalid YAML (colon-space inside an unquoted plain scalar) — confirmed
+  by parsing the committed file with PyYAML locally, fixed, and the file
+  rewritten with a real (not placeholder) QEMU/OVMF pipeline. Trigger
+  changed from `workflow_run` to `workflow_dispatch`-only for now (cost
+  control while this file's own logic is being iterated on).
+- `image/firstboot/wizard.py` replaced its `NotImplementedError` stubs
+  with a real implementation: parses `friday-unattended.yaml` with
+  `python3-pyyaml` (newly added to the Containerfile), finds the real boot
+  disk via `/sysroot`, partitions remaining free space with `sgdisk`,
+  creates the LUKS2/Argon2id lockbox and its five btrfs subvolumes, writes
+  `/etc/crypttab` and four per-subvolume mount units, writes
+  `/var/lib/friday/secrets.env`, and pre-seeds
+  `/home/friday/.friday/.setup_complete` (an Amendment-A1-era workaround
+  for `cmd_start()`'s interactive `Confirm.ask()`, confirmed against the
+  real `friday-desktop` checkout at v5.7.0 — see D-A15).
+- Two new, SPEC.md-unnamed units (`friday-boot-test-probe.service`,
+  `friday-boot-test-relay.service`) exist solely to make M0's checklist
+  observable from a headless CI QEMU boot with no SSH and a loopback-only
+  app — both are inert no-ops on any real deployment (see D-A13).
+- `friday-kiosk.service` is deliberately not enabled at M0 (D-A14) — kiosk
+  is M1 scope.
+- `build/agent-friday.lock`: decided NOT to write one under Amendment A1's
+  editable-install-from-clone path — recorded as a real decision, not left
+  unresolved a second time (see D-A16 in `docs/DECISIONS.md`).
+- A real gap was found and flagged (not silently fixed): `secrets.env`'s
+  SPEC.md-given path is not on any lockbox subvolume, so it is not
+  actually "protected by the lockbox" as §8.1 claims — a Challenge, not a
+  Deviation, since fixing it means changing §5's mount plan.
+
+**Next: dispatch `boot-test.yml` for real once `build.yml` has produced a
+fresh image containing all of the above, read the actual CI output, and
+iterate** — none of the above is checked off below until real command
+output says so.
+
 ## M1-M4
 
 Not started. Per rule 4, they don't start until M0's checklist above is

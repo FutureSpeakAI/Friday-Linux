@@ -119,37 +119,28 @@ jobs:
           sudo podman run --rm quay.io/centos-bootc/bootc-image-builder:latest build --help
 
       - name: Produce raw image (bootc-image-builder)
-        # UNVERIFIED (docs/VERIFY.md): build/disk.toml's exact partition-
-        # customization schema is not confirmed from this sandbox, so this
-        # first pass deliberately omits --config and takes
-        # bootc-image-builder's default disk layout for --type raw. That is
-        # enough to satisfy M0's literal checklist line ("produces a raw
-        # image <= 8 GB compressed") without guessing TOML syntax that the
-        # previous --help step didn't confirm. SPEC.md Section 5's exact
-        # partition sizes (16 GiB fixed root, remainder left free for the
-        # lockbox) still need a verified build/disk.toml before M1, which
-        # needs the lockbox to actually fit — tracked in docs/DECISIONS.md
-        # and docs/VERIFY.md, not silently treated as done here.
-        # CI run 33325393238 got past the earlier "image not known" storage
-        # mismatch (D-A7) and reached real manifest generation, which then
-        # failed: "failed to initialize bootc distro: missing required info:
-        # DefaultRootFs". `--rootfs xfs` below is a best-effort attempt
-        # (Fedora's traditional root filesystem default), not a confirmed
-        # flag — the "Discover" step above now also captures `build --help`
-        # in full, so if this guess is wrong the real accepted flag/value is
-        # already in this same run's log for the next fix, not a second
-        # blind guess.
+        # RESOLVED 2026-08-30 (docs/VERIFY.md, docs/DECISIONS.md): the disk
+        # customization file is mounted at the fixed path /config.toml (no
+        # --config flag exists in `build --help`'s real, captured output;
+        # confirmed against the real osbuild/images bootc-image-builder
+        # README, fetched live). build/disk.toml sets minsize=16GiB for "/"
+        # and minsize=1GiB for "/boot", giving SPEC.md §5's fixed root size
+        # instead of the previous build's content-fit sizing (~9.57 GiB).
+        # `--rootfs xfs` was confirmed correct by CI run 33326572437 (real
+        # ostree deploy, not a guess anymore).
         run: |
           sudo podman run --rm \
             --privileged \
             --security-opt label=type:unconfined_t \
             -v "$(pwd)/output:/output" \
+            -v "$(pwd)/build/disk.toml:/config.toml:ro" \
             -v /var/lib/containers/storage:/var/lib/containers/storage \
             quay.io/centos-bootc/bootc-image-builder:latest \
             --type raw \
             --rootfs xfs \
             localhost/friday-linux:testing
           ls -la output/
+          sudo chmod 644 output/*.raw 2>/dev/null || true
 
       - name: Size check (G7)
         run: |

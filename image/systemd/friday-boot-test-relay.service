@@ -1,0 +1,41 @@
+# Friday Linux — NOT in SPEC.md; added this pass to make M0's acceptance
+# checklist (SPEC.md §15) actually checkable from GitHub Actions CI.
+#
+# Why this exists: friday.service binds only to 127.0.0.1:3000 (§8.1,
+# FRIDAY_BIND_HOST=127.0.0.1 — loopback-only is the whole point of §8.7's
+# "inbound drop by default"). SPEC.md §16.2 wants CI to reach /api/health
+# "over a port forward" from a QEMU `-nic user,hostfwd=...` rule. QEMU's
+# user-mode ("slirp") networking delivers a hostfwd connection to the
+# guest's real NIC address (e.g. 10.0.2.15), not to 127.0.0.1 — a socket
+# bound to loopback-only never sees it, regardless of the NAT tunnel. There
+# is no SSH server to tunnel through instead (§10.2: disabled, no host keys).
+#
+# This unit is the smallest fix that does not touch the app's own bind
+# host, the nftables ruleset, or any real security posture: a plain TCP
+# relay from the guest's external-reachable interface to 127.0.0.1:3000,
+# active ONLY when this boot was provisioned from friday-unattended.yaml
+# (see ConditionPathExists below — the wizard writes that marker file only
+# when it actually consumes an unattended file, i.e. never on a real
+# interactive install). On every real deployment this unit's condition
+# fails at start and it costs nothing beyond that one check.
+[Unit]
+Description=Friday Linux CI-only relay: external:3001 -> 127.0.0.1:3000 (see header)
+ConditionPathExists=/var/lib/friday/.provisioned-unattended
+After=friday.service
+Wants=friday.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /usr/libexec/friday/boot-test-relay.py 0.0.0.0 3001 127.0.0.1 3000
+Restart=on-failure
+RestartSec=2
+# Deliberately NOT hardened like friday.service/friday-caddy.service
+# (NoNewPrivileges/ProtectSystem/etc. would all be fine here too, but this
+# unit only ever runs in a throwaway CI VM, so the extra directives are not
+# worth the risk of them interacting with something untested). Port 3001 is
+# unprivileged, so User=friday needs no special capability to bind it.
+User=friday
+Group=friday
+
+[Install]
+WantedBy=multi-user.target
