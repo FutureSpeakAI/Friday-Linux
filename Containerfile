@@ -51,13 +51,15 @@ RUN dnf install -y \
 # (the base-nvidia variant). That variant is confirmed dead (docs/VERIFY.md,
 # 2026-08-30 — newest tag is 2023/Fedora 37); this Containerfile now builds
 # from plain fedora-bootc (no NVIDIA at all) for M0, which needs no GPU
-# (SPEC.md §15). This override file targets a unit (`nvidia-suspend.service`)
-# that does not exist without the NVIDIA driver layered in, so it is inert
-# until M2 adds that layer (akmods-nvidia or otherwise — see the Containerfile
-# header's Q4 note on the Fedora-version mismatch that still needs resolving
-# before that layer can be added). Left as a COPY rather than removed so the
-# M2 worker has it ready; it does nothing on its own until the driver exists.
-COPY image/systemd/nvidia-suspend-override.conf /usr/lib/systemd/system/nvidia-suspend.service.d/override.conf
+# (SPEC.md §15). The previous pass here left a `COPY` of
+# `image/systemd/nvidia-suspend-override.conf`, a file that was never
+# authored — that made the build fail unconditionally on a missing build
+# context path. Removed rather than stubbed: there is no `nvidia-suspend.service`
+# to override without the driver, so an override file has nothing to attach
+# to until M2 adds the NVIDIA layer (akmods-nvidia or otherwise — see the
+# header's Q4 note on the Fedora-44/akmods-nvidia kernel mismatch that still
+# needs resolving before that layer can be added). Recorded as Deviation
+# D-A2 in docs/DECISIONS.md.
 
 # ── Inference binaries (§6 "Inference") ──────────────────────────────────
 # NOT YET BUILT. build/build-llama.sh builds llama-server-cuda and
