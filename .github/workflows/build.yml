@@ -19,18 +19,26 @@ name: build
 on:
   push:
     branches: [main]
-    # Added 2026-08-30: this build takes 30-60 minutes (llama.cpp compile +
-    # a ~90-package venv), and docs/DECISIONS.md/MILESTONES.md/VERIFY.md
-    # get a real commit after nearly every CI round-trip during active M0
-    # work (SPEC.md §18 rule 8 requires recording results as they happen).
-    # Without this, every doc-only commit re-triggers a full rebuild of an
-    # image that did not change, which is pure waste — confirmed wasteful
-    # in practice (CI run 33339185433, cancelled, triggered by a
-    # docs-only commit). Anything that can actually change the built image
-    # is deliberately NOT in this list.
-    paths-ignore:
-      - 'docs/**'
-      - '**.md'
+    # Added 2026-08-30, refined same day: an allow-list of exactly what can
+    # change the built image, rather than an ever-growing ignore-list. This
+    # build takes 30-60 minutes (llama.cpp compile + a ~90-package venv),
+    # and docs/*.md get a real commit after nearly every CI round-trip
+    # during active M0 work (SPEC.md §18 rule 8), while boot-test.yml
+    # itself is iterated on independently (it is workflow_dispatch-only,
+    # never triggered by this file's own push rule). A plain
+    # `paths-ignore: [docs/**, **.md]` still rebuilt on a boot-test.yml-only
+    # commit — confirmed wasteful in practice (CI run 33339185433,
+    # cancelled, triggered by a docs-only commit before this was an
+    # allow-list at all). `paths:` here is the exhaustive list of what this
+    # Containerfile actually COPYs or reads at build time (see the
+    # Containerfile itself) — add to it deliberately, not by habit, if a
+    # new directory starts being COPYed in.
+    paths:
+      - 'Containerfile'
+      - 'build/**'
+      - 'image/**'
+      - 'helper/**'
+      - '.github/workflows/build.yml'
   workflow_dispatch:
 
 jobs:

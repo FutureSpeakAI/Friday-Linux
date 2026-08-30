@@ -52,6 +52,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Free disk space on the runner
+        # CI run 33339218662's real failure: bootc-image-builder's ostree
+        # pull died with "no space left on device" writing to
+        # /var/tmp/container_images_*. build.yml already needed this exact
+        # fix (docs/DECISIONS.md D-A6) for the same reason — a ~14 GiB-free
+        # default runner, most of it pre-committed to toolchains this repo
+        # never uses, cannot also hold a pulled ~2.2 GB image, a ~17.5 GiB
+        # raw disk file, qemu/OVMF packages, and osbuild's own scratch
+        # space. This step was missing from boot-test.yml entirely (it
+        # only existed in build.yml) — copied over rather than re-derived,
+        # since it is proven to work there.
+        run: |
+          echo "before:" && df -h /
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost \
+            "$AGENT_TOOLSDIRECTORY" /opt/hostedtoolcache /usr/local/lib/android \
+            /opt/az /usr/lib/jvm || true
+          echo "after:" && df -h /
+
       - name: Confirm KVM is available
         # SPEC.md §16.2 asserts GitHub-hosted ubuntu-latest runners expose
         # KVM. docs/VERIFY.md flagged this as historically true but worth a
