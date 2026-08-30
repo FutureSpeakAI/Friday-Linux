@@ -322,6 +322,42 @@ currently just displays it (search the console log / uploaded
 follow-up commit should encode a precise `jq`-based assertion once the
 real shape has actually been seen in a CI run, not before.
 
+## 2026-08-30 — `build/disk.toml`: applied despite a confusing "not supported" log line
+
+CI run 33336423358's "Produce raw image" step printed `blueprint
+validation failed for image type "raw": customizations.filesystem: not
+supported` during manifest generation — reads like a hard failure, but
+the step exited 0 and the real, measured partition table shows the
+customization DID take effect: `/boot` = 2097152 sectors (exactly 1.0
+GiB, matching `disk.toml`), `/` = 33556447 sectors (~16.00 GiB, matching
+`disk.toml`'s `minsize = "16 GiB"` almost exactly) — versus 18685919
+sectors (~8.9 GiB) for root in the pre-disk.toml build (CI run
+33328948151). Not fully understood: possibly a manifest-validation pass
+against a schema that predates `raw`-type support for this customization,
+followed by the real build path applying it anyway; possibly two
+different code paths. Not guessed further — flagged here as a real,
+observed discrepancy between a diagnostic message and actual behavior,
+worth re-examining if a future bootc-image-builder version starts
+actually enforcing what this message claims.
+
+## 2026-08-30 — groupadd -f real anomaly: silent success, group still invisible to useradd
+
+CI run 33335275371: `groupadd -f video` (and `render`, `audio`) produced
+no output (groupadd's normal behavior on any success path — both "created"
+and "already existed, -f made it a no-op" look identical: silent) but the
+very next `useradd --groups video,render,audio friday` in the same RUN
+still reported `useradd: group 'video' does not exist` for all three. This
+was not chased to a definitive root cause (a plausible but UNCONFIRMED
+theory: `nss-systemd`'s dynamic-user mechanism, which needs a running
+systemd instance to resolve and has none inside a `podman build` layer,
+made `groupadd -f` believe the groups already existed via that lookup
+while `useradd`'s classic NSS "files" path saw nothing) — worked around,
+not explained, by writing directly to `/etc/group` instead (confirmed
+working in CI run 33336423358). If this class of issue recurs elsewhere
+in this Containerfile, do not assume `groupadd`/`useradd` behave as
+documented inside a `podman build` layer without a running init system —
+verify directly.
+
 ## Explicitly not verified, and not to be guessed
 
 - Whether the specific §13 upstream PRs have actually been opened/merged

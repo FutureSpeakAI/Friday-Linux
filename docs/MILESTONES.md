@@ -293,10 +293,63 @@ D-A15 for the full list of what changed and why:
   actually "protected by the lockbox" as §8.1 claims — a Challenge, not a
   Deviation, since fixing it means changing §5's mount plan.
 
-**Next: dispatch `boot-test.yml` for real once `build.yml` has produced a
-fresh image containing all of the above, read the actual CI output, and
-iterate** — none of the above is checked off below until real command
-output says so.
+**2026-08-30 — CI run 33336423358: `build.yml` fully green with all of the
+above real, after two genuine failures fixed via real CI output (not
+guessed):**
+1. First real failure (CI runs 33334408813, 33335275371): `useradd: group
+   'video' does not exist` (same for `render`, `audio`) — these groups are
+   not created by Mesa/PipeWire's packages at `dnf install` time inside a
+   container build (no init system running to apply their `sysusers.d`
+   drop-ins). `groupadd -f` did NOT fix this (produced no output, and
+   `useradd` still reported all three missing immediately after — an
+   unexplained NSS/groupadd interaction, recorded honestly as unresolved
+   in `docs/DECISIONS.md` rather than a confident but wrong theory).
+   Fixed deterministically by appending directly to `/etc/group` with a
+   freshly computed free GID — CI run 33336423358's own log confirms
+   `created video with GID 977`, `created render with GID 978`,
+   `created audio with GID 979`, and the subsequent `useradd` succeeded.
+2. `build/disk.toml` real effect confirmed, DESPITE a confusing log line:
+   bootc-image-builder printed `blueprint validation failed for image
+   type "raw": customizations.filesystem: not supported` during manifest
+   generation, which looks like a hard failure but was not one — the step
+   completed successfully and the REAL measured partition table proves
+   the customization took effect: `/boot` is exactly 2097152 sectors (1.0
+   GiB, matches `disk.toml`'s `minsize`) and `/` is exactly 33556447
+   sectors (~16.00 GiB, matches `disk.toml`'s `minsize` almost exactly) —
+   compare to the pre-disk.toml build (CI run 33328948151), where root was
+   only 18685919 sectors (~8.9 GiB, sized to fit content, not fixed).
+   Recorded as an open, unexplained discrepancy in `docs/VERIFY.md` (the
+   warning text vs. the observed real effect) rather than asserted as
+   fully understood.
+3. Real evidence, this run:
+   - Image digest: `sha256:98d902abcaeefc2eb15089854ca81163349d329a3073964ab8dc9270b9b979cb`
+     pushed to `ghcr.io/futurespeakai/friday-linux:testing` (private,
+     confirmed unchanged — `Login Succeeded!`, all blobs + config copied).
+   - Raw disk: `disk.raw` size `18782093312` bytes (~17.5 GiB
+     uncompressed, up from ~10.4 GiB pre-disk.toml — expected, since root
+     is now genuinely fixed at 16 GiB instead of fit-to-content).
+   - G7 size check: `compressed size: 1719 MiB (budget: 8192 MiB, SPEC.md
+     G7)` — PASS, unchanged from the pre-disk.toml build, because the
+     extra headroom in the now-fixed-size root partition is mostly unused
+     space that `xz` compresses away almost entirely.
+   - Real partition table (loop0, GPT): p1 BIOS-boot 2048 sectors, p2 ESP
+     1026048 sectors (~501 MiB — SPEC.md wants 512 MiB; not independently
+     configurable per `docs/DECISIONS.md` D-A10, close enough), p3 /boot
+     2097152 sectors (1.0 GiB), p4 / 33556447 sectors (~16.0 GiB).
+
+**Also fixed this pass, before the failures above (not yet independently
+CI-confirmed as necessary, since the build never got far enough to prove
+or disprove them on their own, but no evidence contradicts them either):**
+`mkdir -p /var/home` before `useradd` (preempting a suspected `/home` →
+`/var/home` ostree symlink, the same class of bug that already broke
+`UV_CACHE_DIR`'s default path for `/root`) — the build got past this line
+cleanly in all three attempts, consistent with the fix being either
+correct or unnecessary, not with it being wrong.
+
+**Next: dispatch `boot-test.yml` against this real image/digest, read the
+actual CI output, and iterate** — none of M0's remaining three checklist
+lines (QEMU boot + health, `bootc status`/`/usr` read-only, lockbox) are
+checked off below until real command output says so.
 
 ## M1-M4
 
