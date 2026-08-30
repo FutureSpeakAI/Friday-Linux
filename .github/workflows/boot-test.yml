@@ -162,8 +162,20 @@ jobs:
         # not 3000 — see that unit's header comment for why a plain hostfwd
         # cannot reach a service bound to 127.0.0.1 inside the guest.
         run: |
-          OVMF_CODE="$(dpkg -L ovmf | grep -m1 'OVMF_CODE\.fd$')"
-          OVMF_VARS_SRC="$(dpkg -L ovmf | grep -m1 'OVMF_VARS\.fd$')"
+          # CI run 33339954425's real failure: Ubuntu's `ovmf` package does
+          # not ship plain OVMF_CODE.fd/OVMF_VARS.fd — the "OVMF firmware
+          # files actually installed" listing from the previous step's real
+          # output shows OVMF_CODE_4M.fd, OVMF_CODE_4M.secboot.fd,
+          # OVMF_VARS_4M.fd, etc. The old grep patterns matched nothing,
+          # both variables were silently empty, and `cp "" ...` failed with
+          # no useful message. Using the plain (non-secure-boot,
+          # non-snakeoil) 4M variant, matching SPEC.md §16.2 ("Secure Boot
+          # off in CI").
+          OVMF_CODE="$(dpkg -L ovmf | grep -m1 'OVMF_CODE_4M\.fd$')"
+          OVMF_VARS_SRC="$(dpkg -L ovmf | grep -m1 'OVMF_VARS_4M\.fd$')"
+          echo "OVMF_CODE=${OVMF_CODE}"
+          echo "OVMF_VARS_SRC=${OVMF_VARS_SRC}"
+          test -n "${OVMF_CODE}" -a -n "${OVMF_VARS_SRC}"
           cp "${OVMF_VARS_SRC}" /tmp/OVMF_VARS.fd
           echo "ovmf_code=${OVMF_CODE}" >> "$GITHUB_ENV"
           sudo qemu-system-x86_64 \
