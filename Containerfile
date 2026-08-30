@@ -96,7 +96,14 @@ COPY helper/friday-os-helper/                  /usr/libexec/friday/
 RUN systemctl enable friday-lockbox.mount friday.service friday-caddy.service \
         friday-kiosk.service friday-firstboot.service nftables.service \
     && chmod 440 /etc/sudoers.d/friday-os-helper \
-    && chmod 0755 /usr/libexec/friday/friday-os-helper
+    && chmod 0755 /usr/libexec/friday/friday-os-helper \
+    && chmod 0755 /usr/share/friday/firstboot/wizard.py \
+    && chmod 0755 /etc/greenboot/check/required.d/*.sh
+# Executable bits above are set explicitly rather than relied on from the
+# checkout: this repo is authored from a Windows sandbox, where Git does
+# not preserve the Unix execute bit (every file lands as 100644 in the
+# git tree regardless of a local `chmod +x`). Confirmed via `git ls-files
+# -s` after committing — see docs/DECISIONS.md.
 
 # No SSH host keys are generated at build time (§10.2): the unit is present
 # and disabled, matching "SSH server installed but disabled with no host

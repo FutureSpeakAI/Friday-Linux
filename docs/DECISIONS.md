@@ -252,3 +252,14 @@ silently made, for each place the spec's text couldn't be used verbatim.
   reasoning as the CI deviation above: a script that looks complete but was
   never run against a real cryptsetup/btrfs version is worse than one that
   states exactly what's missing.
+
+- **Executable bits are set in the Containerfile, not relied on from git.**
+  Confirmed via `git ls-files -s` after committing: every file this repo
+  tracks landed as mode `100644`, including the `.sh` scripts and the
+  `friday-os-helper` binary that were `chmod +x`'d locally — Windows Git
+  does not preserve the Unix execute bit through commit. The Containerfile
+  now `chmod`s the greenboot scripts and the wizard explicitly (the helper
+  already was). Worth a repo-level fix later (a pre-commit hook or
+  `git update-index --chmod=+x` run from a real Linux/macOS clone) so this
+  isn't a standing trap for the next person who edits these files from
+  Windows and forgets the Containerfile compensates for it.
