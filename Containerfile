@@ -100,8 +100,21 @@ RUN dnf install -y \
 # is later shadowed by the lockbox's @home subvolume once the first-boot
 # wizard mounts it there (normal, expected: the mountpoint's prior contents
 # become invisible under the mount, not deleted). Supplementary groups match
-# friday.service's SupplementaryGroups= line (§8.1); `video`/`render` exist
-# in the base image via Mesa, `audio` via PipeWire.
+# friday.service's SupplementaryGroups= line (§8.1).
+#
+# CORRECTED (CI run 33334408813, real failure, not guessed): the original
+# version of this comment assumed `video`/`render`/`audio` already exist
+# via Mesa/PipeWire's package scriptlets. They do not, at this point in a
+# container build: `useradd: group 'video' does not exist` (and same for
+# `render`, `audio`) — real error output. These groups are defined via
+# those packages' `sysusers.d` drop-ins, which are applied by
+# `systemd-sysusers.service` at first BOOT, not during `dnf install` inside
+# a `podman build` layer (no init system is running to apply them). Fixed
+# by creating them explicitly with `groupadd -f` (idempotent — a no-op if
+# the group already exists) before `useradd`. When `systemd-sysusers` runs
+# for real at first boot, it treats an existing group of the same name as
+# already satisfied — this does not conflict with sysusers.d's own
+# creation of the same groups.
 #
 # `mkdir -p /var/home` first: ostree's standard layout makes /home a
 # symlink into /var/home (the same "/usr is the only truly immutable tree;
@@ -112,6 +125,7 @@ RUN dnf install -y \
 # so `useradd -m -d /home/friday` would otherwise try to create a home
 # directory through a symlink to a nonexistent target.
 RUN mkdir -p /var/home && \
+    groupadd -f video && groupadd -f render && groupadd -f audio && \
     useradd --create-home --home-dir /home/friday --shell /bin/bash \
         --groups video,render,audio friday \
     && passwd -l friday
