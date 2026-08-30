@@ -178,6 +178,21 @@ figure below was re-checked with `git show v5.7.0:<path>` against the real
   `[windows]` extra — if this import guard isn't fixed first, that job
   cannot even collect tests. Worth surfacing to whoever picks up PR-8.
 
+- **Deviation D-A2: removed the `COPY image/systemd/nvidia-suspend-override.conf`
+  line from the Containerfile instead of authoring the file.** Found while
+  actually trying to get `podman build` to succeed in CI (this repo's M0
+  execution pass, 2026-08-30): the previous pass's Containerfile referenced
+  this file in a `COPY` instruction, but the file was never created anywhere
+  in `image/systemd/`, so the build would fail unconditionally on a missing
+  build-context path — before even reaching the venv-install step, i.e.
+  before any of the previously-flagged blockers (pins, PR-1/2/3) could even
+  be exercised. Since M0 builds from plain `fedora-bootc` with no NVIDIA
+  layer at all (Q4/Q5 resolution above), there is no `nvidia-suspend.service`
+  unit for an override file to attach to yet regardless — so the fix is to
+  remove the line, not invent plausible override contents, and let M2 (which
+  actually adds the NVIDIA layer) add both the service and its override
+  together.
+
 ## Blocking dependency: PR-1/2/3 not yet merged upstream
 
 §13's last paragraph is explicit: "Friday Linux M0 (Section 15) can start on
