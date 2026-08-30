@@ -147,14 +147,49 @@ built; `--rootfs xfs` plus bootc-image-builder's own defaults produced
 before M1 (the wizard needs specific free space to exist for the lockbox).
 Not silently treated as done.
 
+**2026-08-30 — CI run 33328948151: the entire `build` workflow is GREEN,
+every step, for the first time.**
+https://github.com/FutureSpeakAI/Friday-Linux/actions/runs/33328948151
+```
+Set up job                                                          success
+Run actions/checkout@v4                                             success
+Read pins                                                           success
+Fail fast if pins are unresolved                                    skipped (pins are resolved)
+Free disk space on the runner                                       success
+podman build                                                        success
+Push image to GHCR                                                  success
+Copy built image into root's podman storage                         success
+Discover bootc-image-builder CLI                                    success
+Produce raw image (bootc-image-builder)                             success
+Size check (G7)                                                     success
+Sign with cosign — SKIPPED, out of scope for M0                     success (clean skip)
+Complete job                                                        success
+```
+Real evidence pulled from this run's own log, not paraphrased:
+- Image pushed to GHCR: `podman push ghcr.io/futurespeakai/friday-linux:
+  testing` → `Login Succeeded!`, all blobs copied, `Copying config
+  sha256:728b08e86d48604a5e50ef984a571094c273688f545f61ea60606b59ec0a4c61`,
+  `Writing manifest to image destination`. **Image digest:
+  `sha256:728b08e86d48604a5e50ef984a571094c273688f545f61ea60606b59ec0a4c61`.**
+- `bootc-image-builder` produced `disk.raw` at `11168382976` bytes (~10.4
+  GiB uncompressed) via a real ostree deployment (confirmed loop-device
+  partition mounts and a real deployment commit hash in the log).
+- G7 size check: `compressed size: 1719 MiB (budget: 8192 MiB, SPEC.md
+  G7)` — PASS, well under budget.
+- Signing step is a clean, intentional skip (exit 0, explanatory echo
+  lines), not a failure — matches the executor's instruction that a
+  deliberately out-of-scope step should not redden the whole job.
+
 **Acceptance checklist, updated:**
 - [x] `podman build` succeeds, including the real `llama-server-vulkan`
-      build stage (CI run 33326572437). Image tag `localhost/friday-linux:
-      testing`. GHCR push step added same session, not yet reconfirmed by a
-      fresh run. Signing remains a deliberate, clearly-labeled skip (SPEC.md
-      §10.3, out of scope for M0 per the executor's operating instructions).
+      build stage, AND the image is pushed to `ghcr.io/futurespeakai/
+      friday-linux:testing` (digest `sha256:728b08e86d48604a5e50ef984a571
+      094c273688f545f61ea60606b59ec0a4c61`, CI run 33328948151). Signing
+      remains a deliberate, clearly-labeled skip (SPEC.md §10.3, out of
+      scope for M0 per the executor's operating instructions — no
+      `COSIGN_*` secret exists or is referenced).
 - [x] `bootc-image-builder` produces a raw image ≤ 8 GB compressed — CI run
-      33326572437, real command output: `compressed size: 1719 MiB (budget:
+      33328948151, real command output: `compressed size: 1719 MiB (budget:
       8192 MiB, SPEC.md G7)`. Uses bootc-image-builder's default disk
       layout plus `--rootfs xfs`, NOT a verified `build/disk.toml` — SPEC.md
       §5's exact partition scheme remains a real, tracked gap for M1.
@@ -185,17 +220,35 @@ registry API queries before this session started (`docs/VERIFY.md`,
 2026-08-30 entries). This session's own work is the fourth item —
 `disk.toml`'s schema — still open, tracked below.
 
-**Next concrete steps, in order:** (1) build `llama-server-vulkan` in a
-proper multi-stage Containerfile stage from `build/llama.cpp.pin`
-(`build/build-llama.sh` does not exist yet — M0 explicitly needs this
-binary per SPEC.md §15, it is not optional); (2) discover
-`bootc-image-builder`'s real `disk.toml` schema by having a CI step actually
-invoke `podman run --rm quay.io/centos-bootc/bootc-image-builder:latest
---help` rather than guessing from old examples, then replace `build.yml`'s
-placeholder `exit 1` step with the real invocation; (3) get a raw image
-built and size-checked; (4) boot-test in QEMU/KVM (separate workflow,
-lower priority than build.yml per this session's mandate — see its own
-open CI quirk in `docs/VERIFY.md`).
+**Next concrete steps, updated 2026-08-30 after `build.yml` went fully
+green (CI run 33328948151, see above) — items (1)-(3) below are DONE:**
+1. ~~build `llama-server-vulkan` in a proper multi-stage Containerfile
+   stage~~ — done, static-linked and `ldd`-verified (Deviation D-A5).
+2. ~~discover `bootc-image-builder`'s real CLI/schema via CI~~ — done;
+   `--rootfs xfs` plus bootc-image-builder's default disk layout produces a
+   working raw image. `build/disk.toml` itself is still not written (a real
+   gap, see the acceptance checklist above and `docs/VERIFY.md`).
+3. ~~get a raw image built and size-checked~~ — done, 1719 MiB compressed
+   against the 8192 MiB G7 budget.
+
+**What's actually left for M0, in order:**
+4. Write a real `build/disk.toml` expressing SPEC.md §5's exact partition
+   scheme (16 GiB fixed root, remainder free for the lockbox) — needed
+   before M1's wizard can rely on that free space existing.
+5. `ci/boot-test.yml`: QEMU/KVM boot with the unattended file, `/api/health`
+   200, sealed `/usr`, lockbox layout — a separate workflow with its own
+   open, low-priority CI quirk (`docs/VERIFY.md`, "workflow file issue" with
+   zero jobs created) that was out of this session's scope; needs its own
+   pass once `build.yml`'s raw image is a settled artifact to boot from.
+6. The first-boot wizard's real lockbox-creation implementation
+   (`cryptsetup luksFormat` argon2id parameters, btrfs subvolumes,
+   `/etc/crypttab` generation) — currently `NotImplementedError` stubs,
+   deliberately not guessed (`docs/DECISIONS.md` Deviations).
+7. `build/agent-friday.lock` — SPEC.md wanted a uv lockfile for the app
+   venv; Amendment A1's editable-install-from-git-clone workaround doesn't
+   fit that model. Not attempted this session; needs a decision recorded in
+   `docs/DECISIONS.md` on whether a lockfile is meaningful under A1's
+   approach or should be explicitly skipped.
 
 ## M1-M4
 
