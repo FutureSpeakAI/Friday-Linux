@@ -269,6 +269,19 @@ silently made, for each place the spec's text couldn't be used verbatim.
   the M0 entry below is no longer "deliberately left unresolved" — A1 gives
   it a real, if temporary, value.
 
+- **CI workflow files moved from `ci/` to `.github/workflows/`.** §14's
+  repo layout lists `ci/build.yml` and `ci/boot-test.yml`. GitHub Actions
+  only discovers and runs workflows placed under `.github/workflows/` — it
+  does not scan an arbitrary `ci/` directory. Confirmed the hard way: after
+  the repo was created and pushed to `main` (with a `push: branches: [main]`
+  trigger already in `build.yml`), `gh api repos/FutureSpeakAI/Friday-Linux/
+  actions/workflows` returned zero workflows. Moved both files with `git mv`
+  to `.github/workflows/build.yml` and `.github/workflows/boot-test.yml` —
+  file contents unchanged, so §14's `ci/` naming survives as their logical
+  home in spec-speak even though their real path had to move. If `ci/` is
+  meant to hold anything else non-workflow-shaped later (it currently holds
+  nothing), that's unaffected by this move.
+
 - **Executable bits are set in the Containerfile, not relied on from git.**
   Confirmed via `git ls-files -s` after committing: every file this repo
   tracks landed as mode `100644`, including the `.sh` scripts and the
