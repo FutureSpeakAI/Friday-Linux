@@ -46,6 +46,17 @@ RUN dnf install -y \
 
 # avahi and cups are P1 (§6, §8.7) — not installed in v1.
 
+# ── Build-time-only tooling for the venv-install step below ──────────────
+# `git` (to clone Agent-Friday at the pin) and `uv` (to create the venv) are
+# not part of §6's BOM — they are not needed once the venv exists — but
+# Amendment A1's workaround needs both during the build itself. Installed in
+# the same layer rather than a separate build stage for now: multi-stage
+# would keep them out of the shipped image (worth doing before the G7 size
+# budget gets tight), but that is a size-optimization deferred past M0's
+# "does it build at all" bar, not a correctness requirement. Recorded here
+# rather than silently left unaddressed.
+RUN dnf install -y git uv && dnf clean all
+
 # ── NVIDIA suspend services (§8.6) ───────────────────────────────────────
 # DEFERRED TO M2: §4.1 assumed the base image ships the NVIDIA kmod/userspace
 # (the base-nvidia variant). That variant is confirmed dead (docs/VERIFY.md,
@@ -86,8 +97,7 @@ RUN dnf install -y \
 # patch — clone the pinned tag in full, install it editable, then copy
 # data/ and skills/ out to the seed location friday-firstboot reads from.
 # Removed the moment PR-3 merges and build/agent-friday.pin moves past it.
-RUN --mount=type=cache,target=/root/.cache/uv \
-    AGENT_FRIDAY_TAG="$(grep -v '^#' build/agent-friday.pin | head -1)" && \
+RUN AGENT_FRIDAY_TAG="$(grep -v '^#' build/agent-friday.pin | head -1)" && \
     git clone --branch "${AGENT_FRIDAY_TAG}" --depth 1 \
         https://github.com/FutureSpeakAI/Agent-Friday.git /usr/lib/friday/src && \
     uv venv /usr/lib/friday/venv && \
