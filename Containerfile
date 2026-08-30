@@ -98,11 +98,20 @@ RUN dnf install -y git uv && dnf clean all
 # data/ and skills/ out to the seed location friday-firstboot reads from.
 # Removed the moment PR-3 merges and build/agent-friday.pin moves past it.
 COPY build/agent-friday.pin /tmp/agent-friday.pin
+# HOME=/tmp and an explicit UV_CACHE_DIR sidestep a bootc-image quirk: /root
+# in a Fedora bootc container is a symlink into /var/roothome, and /var is
+# intentionally near-empty in the built image (it's state, populated by
+# systemd-tmpfiles at first boot, not at build time) — so `uv`'s default
+# cache path under $HOME/.cache resolves to a broken symlink target and
+# `uv venv` fails with "failed to create directory `/root/.cache/uv`: File
+# exists (os error 17)". Confirmed by CI run 33319416403. Using /tmp (a real
+# directory in the build container) avoids the whole class of problem rather
+# than trying to pre-create /var/roothome.
 RUN AGENT_FRIDAY_TAG="$(grep -v '^#' /tmp/agent-friday.pin | head -1)" && \
     git clone --branch "${AGENT_FRIDAY_TAG}" --depth 1 \
         https://github.com/FutureSpeakAI/Agent-Friday.git /usr/lib/friday/src && \
-    uv venv /usr/lib/friday/venv && \
-    uv pip install --python /usr/lib/friday/venv/bin/python \
+    HOME=/tmp UV_CACHE_DIR=/tmp/uv-cache uv venv /usr/lib/friday/venv && \
+    HOME=/tmp UV_CACHE_DIR=/tmp/uv-cache uv pip install --python /usr/lib/friday/venv/bin/python \
         -e "/usr/lib/friday/src[voice-local-lite,local,compression,federation,google,compose,provenance]" && \
     mkdir -p /usr/share/friday/seed && \
     cp -r /usr/lib/friday/src/data   /usr/share/friday/seed/data && \
