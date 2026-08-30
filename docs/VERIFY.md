@@ -261,3 +261,97 @@ turn out to be (note its example file wants `swap=16GB` too, which B1 did
 not ask for — reconcile the two missions' `.wslconfig` requirements with
 Stephen before writing a shared file, since both are Windows-machine-global,
 not per-project).
+
+**Confirmed by the owning session (projects-0b, 2026-08-30):** Friday-Models'
+WSL2 setup is real, active work, not a stale scaffold — `Ubuntu-24.04` is
+installed, `.wslconfig` (`memory=26GB swap=16GB`) is applied, and a CUDA
+toolkit + `llama.cpp` (CUDA) build was starting at time of contact. `wsl
+--shutdown` must not run until that session signals a safe window. No GPU
+contention expected either, since Friday Linux's QEMU boot tests don't need
+the GPU and are running via GitHub Actions instead (see B2/B3 below).
+
+## 2026-08-30 — Step B2: GitHub remote created
+
+Per Stephen's explicit go-ahead (checkpoint required by the dispatch before
+touching any GitHub remote): created the private repo
+`FutureSpeakAI/Friday-Linux`, pushed `main`. `gh auth status` was already
+confirmed authenticated (FutureSpeakAI account, `repo` scope) before this.
+
+**Bug found and fixed:** `ci/build.yml` and `ci/boot-test.yml` (SPEC.md §14's
+named paths) were never picked up by GitHub Actions after the push —
+`gh api repos/FutureSpeakAI/Friday-Linux/actions/workflows` returned
+`{"total_count":0}` despite `build.yml` having a `push: branches: [main]`
+trigger. Root cause: GitHub Actions only discovers workflows under
+`.github/workflows/`, not an arbitrary `ci/` directory. Moved both files
+there with `git mv` (content unchanged); confirmed registered
+(`total_count: 2`) and running after the next push. Recorded as a deviation
+in `docs/DECISIONS.md`.
+
+Both workflows are now genuinely gating (not skipped, not silently green):
+- `build` failed at its deliberate `exit 1` "Fail fast if pins are
+  unresolved" step before this session's pin-resolution work below (expected
+  — `build/llama.cpp.pin` didn't exist yet and `agent-friday.pin` still held
+  its pre-Amendment-A1 placeholder text).
+- `boot-test` failed immediately with "workflow file issue" on the same push
+  that introduced it, because it references `workflow_run: workflows:
+  [build]` and `build` hadn't completed a run yet at that point in the same
+  push. Expected to resolve itself once `build` has completed at least one
+  run under its current name; watch the next push to confirm rather than
+  assuming.
+
+## 2026-08-30 — Q4/Q5/llama.cpp pin: RESOLVED via registry API (no skopeo on this Windows host — used token-authenticated `curl` against the same v2 registry API skopeo would use)
+
+**Q4 (Universal Blue base image):** `ublue-os/base-nvidia` (the NVIDIA-enabled
+minimal base ADR-002 wanted first) is confirmed dead — `curl` against
+`https://ghcr.io/v2/ublue-os/base-nvidia/tags/list` returns tags no newer
+than 2023 (`37-*`, `pr-42`), nothing referencing a current Fedora release.
+Its sibling `ublue-os/base-main` is alive and rebuilt daily (`tags/list`
+shows `44`, `44-20260611`, `latest-20260611` etc.) but has no NVIDIA variant.
+So ADR-002's own documented fallback applies: base directly on
+`fedora-bootc`, and layer NVIDIA support in separately for GPU milestones
+rather than getting it "for free" from the base image.
+
+**Q5 (Fedora release):** confirmed via
+`registry.fedoraproject.org/v2/fedora-bootc/tags/list` (no auth token
+required, unlike ghcr.io) — tags run `40` through `46` plus `rawhide`.
+Compared digests with `curl -D-` (Docker-Content-Digest response header):
+`fedora-bootc:latest` and `fedora-bootc:44` return the identical digest
+(`sha256:e8f93cc9b1a0089216c674d5d9e8319e8cc40911dc9ee23d07d49ceea5177590`),
+while `45` and `46` are different (newer/branched, not yet "latest"). **44 is
+confirmed current stable**, matching §17's own default guess — but confirmed
+by digest comparison, not assumed. Pinned by digest in the Containerfile.
+
+**New finding, not anticipated by SPEC.md or DECISIONS.md before now: a real
+Fedora-version mismatch that blocks M2, not M0.** `ublue-os/akmods-nvidia`
+(the fallback NVIDIA kmod source ADR-002 names) is alive, but its only
+current kmod builds target `coreos-stable-42` and `centos-10` kernels —
+**nothing for Fedora 44.** `curl` against
+`https://ghcr.io/v2/ublue-os/akmods-nvidia/tags/list` shows no `44` or
+`fc44` tag of any kind. Pinning the base to Fedora 44 (correct for M0, which
+needs no GPU per SPEC.md §15) means akmods-nvidia's NVIDIA kmod cannot be
+layered onto this exact base as-is when M2 needs it — a kernel/kmod version
+mismatch is normally fatal (kmods only load against the exact kernel they
+were built for). Options for M2, none decided here: (a) wait for Universal
+Blue to publish a Fedora-44-matched akmods-nvidia build, (b) move this
+project's base pin back to Fedora 42 to match akmods-nvidia's current build
+(costs the newer base's fixes/packages), (c) source NVIDIA kmods some other
+way. Flagging now, before M2 planning starts, rather than letting it surface
+as a build failure later.
+
+**llama.cpp tag:** `gh api repos/ggml-org/llama.cpp/releases/latest` →
+`v0.3.0`, published 2026-08-25; `target_commitish`
+`c1d0e7a004015f23bc0233470b747b596f29b264`. Note SPEC.md's own text warned
+llama.cpp "does not use stable semantic versioning... tags frequently with
+`b####` build numbers" — that appears to be stale relative to the project's
+current practice, which uses `vX.Y.Z` release tags now. Recorded both the
+tag and the commit SHA in `build/llama.cpp.pin` per rule 5.
+
+**What's still open, deliberately not guessed:** `build/build-llama.sh`
+(compiles `llama-server-vulkan` for M0; `-cuda` comes later), the Vulkan
+build's exact CMake flags, `build/disk.toml` (bootc-image-builder's disk
+customisation schema — still unverified per the entry above), and
+`build/agent-friday.lock` (a real lockfile for the Amendment-A1 editable
+-install path, which doesn't match the git-tag-install path the originally
+planned lockfile assumed). These block `build.yml` from getting past its
+next step once pins stop being the first failure; left for the M0 execution
+pass rather than authored here without ever having run them.

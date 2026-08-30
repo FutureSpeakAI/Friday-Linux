@@ -1,23 +1,30 @@
 # Friday Linux — SPEC.md §4.1 (base image), §6 (bill of materials)
 #
-# STATUS: not buildable yet. Blocked on two independent things, both
-# recorded in docs/DECISIONS.md and docs/VERIFY.md:
-#   1. Q4/Q5 (SPEC.md §17) — the exact base image ref below is UNVERIFIED,
-#      per rule 5 never to be pinned by digest from memory.
-#   2. build/agent-friday.pin is empty — PR-1/2/3 have not landed upstream
-#      in Agent-Friday yet, so there is no tag/commit to install where
-#      FRIDAY_OS_MODE does anything. See docs/DECISIONS.md "Blocking
-#      dependency: PR-1/2/3 not yet merged upstream."
+# STATUS: buildable for M0 (no GPU) as of 2026-08-30 — Q4/Q5 resolved below.
+# Still blocked on one thing for the venv-install step, per Amendment A1:
+# build/agent-friday.pin now points at v5.7.0 (a real, working tag), so this
+# blocker is resolved for M0 too. See docs/DECISIONS.md "Deviation D-A1."
 #
 # One RUN per concern, per SPEC.md §18 rule 4, with the pin files read at
 # build time so a version bump is a one-line diff outside this file.
 
-# UNVERIFIED (SPEC.md §17 Q4, docs/VERIFY.md): exact Universal Blue image
-# name and digest not yet confirmed with `skopeo inspect`. This is the
-# NVIDIA-enabled variant of the minimal base per ADR-002; if it does not
-# exist in kiosk-suitable form, ADR-002's fallback (fedora-bootc +
-# akmods-nvidia) replaces this line and gets recorded in docs/DECISIONS.md.
-FROM ghcr.io/ublue-os/base-nvidia:latest
+# RESOLVED (SPEC.md §17 Q4, docs/VERIFY.md, checked via registry API 2026-08-30):
+# ublue-os/base-nvidia is DEAD — its newest tag is from 2023, Fedora 37. Its
+# sibling base-main IS live (current tag "44", updated daily), but it carries
+# no NVIDIA variant. So ADR-002's own fallback applies: fedora-bootc directly,
+# with akmods-nvidia layered in later for GPU milestones (M2+) rather than in
+# this base image. Fedora 44 confirmed current stable: fedora-bootc:latest
+# and fedora-bootc:44 share the same digest below (registry-verified, not
+# guessed). akmods-nvidia's newest available kmod build targets
+# "coreos-stable-42" / "centos-10" kernels only — NOT Fedora 44 — so it
+# cannot be layered onto this pin as-is. That mismatch doesn't block M0
+# (no GPU, per SPEC.md §15), but IT BLOCKS M2 (NVIDIA reference machine)
+# until one of: (a) Universal Blue publishes an akmods-nvidia build for
+# Fedora 44, (b) this project's base pin moves back to Fedora 42 to match
+# akmods-nvidia's current kmod, or (c) a different NVIDIA kmod source is
+# used. Flagging now rather than waiting for M2 to discover it. Recorded in
+# full, with the actual registry queries and their output, in docs/VERIFY.md.
+FROM registry.fedoraproject.org/fedora-bootc:44@sha256:e8f93cc9b1a0089216c674d5d9e8319e8cc40911dc9ee23d07d49ceea5177590
 
 # ── System packages (§6 "System") ────────────────────────────────────────
 # Package names are UNVERIFIED against Fedora repos — see docs/VERIFY.md
@@ -40,9 +47,16 @@ RUN dnf install -y \
 # avahi and cups are P1 (§6, §8.7) — not installed in v1.
 
 # ── NVIDIA suspend services (§8.6) ───────────────────────────────────────
-# The base image ships the NVIDIA kmod/userspace (§4.1); this only enables
-# the suspend/resume units so loaded seats survive suspend
-# (PreserveVideoMemoryAllocations=1 is set in the service override below).
+# DEFERRED TO M2: §4.1 assumed the base image ships the NVIDIA kmod/userspace
+# (the base-nvidia variant). That variant is confirmed dead (docs/VERIFY.md,
+# 2026-08-30 — newest tag is 2023/Fedora 37); this Containerfile now builds
+# from plain fedora-bootc (no NVIDIA at all) for M0, which needs no GPU
+# (SPEC.md §15). This override file targets a unit (`nvidia-suspend.service`)
+# that does not exist without the NVIDIA driver layered in, so it is inert
+# until M2 adds that layer (akmods-nvidia or otherwise — see the Containerfile
+# header's Q4 note on the Fedora-version mismatch that still needs resolving
+# before that layer can be added). Left as a COPY rather than removed so the
+# M2 worker has it ready; it does nothing on its own until the driver exists.
 COPY image/systemd/nvidia-suspend-override.conf /usr/lib/systemd/system/nvidia-suspend.service.d/override.conf
 
 # ── Inference binaries (§6 "Inference") ──────────────────────────────────
@@ -62,19 +76,35 @@ COPY image/systemd/nvidia-suspend-override.conf /usr/lib/systemd/system/nvidia-s
 # COPY image/voice/ /usr/share/friday/voice/
 
 # ── Application venv (§6 "Application") ──────────────────────────────────
-# BLOCKED: build/agent-friday.pin is intentionally empty. See the header
-# comment above and docs/DECISIONS.md. This step cannot run until it is
-# filled in with a real tag/commit that includes PR-1 through PR-3.
-#
-# RUN --mount=type=cache,target=/root/.cache/uv \
-#     AGENT_FRIDAY_TAG="$(cat build/agent-friday.pin)" && \
-#     uv venv /usr/lib/friday/venv && \
-#     uv pip install --python /usr/lib/friday/venv/bin/python \
-#         --requirement build/agent-friday.lock \
-#         "agent-friday[voice-local-lite,local,compression,federation,google,compose,provenance] @ git+https://github.com/FutureSpeakAI/Agent-Friday@${AGENT_FRIDAY_TAG}"
+# Per Amendment A1 (docs/SPEC.md, Deviation D-A1 in docs/DECISIONS.md):
+# PR-3's packaging work (installable from a git tag with no separate seed
+# copy step) has not landed upstream, so `pip install ... @ git+...@<tag>`
+# alone would not carry data/ or skills/ into the venv. Until PR-3 lands,
+# this repo does that copy itself as a deployment step, not a vendored
+# patch — clone the pinned tag in full, install it editable, then copy
+# data/ and skills/ out to the seed location friday-firstboot reads from.
+# Removed the moment PR-3 merges and build/agent-friday.pin moves past it.
+RUN --mount=type=cache,target=/root/.cache/uv \
+    AGENT_FRIDAY_TAG="$(grep -v '^#' build/agent-friday.pin | head -1)" && \
+    git clone --branch "${AGENT_FRIDAY_TAG}" --depth 1 \
+        https://github.com/FutureSpeakAI/Agent-Friday.git /usr/lib/friday/src && \
+    uv venv /usr/lib/friday/venv && \
+    uv pip install --python /usr/lib/friday/venv/bin/python \
+        -e "/usr/lib/friday/src[voice-local-lite,local,compression,federation,google,compose,provenance]" && \
+    mkdir -p /usr/share/friday/seed && \
+    cp -r /usr/lib/friday/src/data   /usr/share/friday/seed/data && \
+    cp -r /usr/lib/friday/src/skills /usr/share/friday/seed/skills
 #
 # Explicitly excluded per §6 and §18 rule 7 (prohibited shortcuts): the
 # [windows] extra, and therefore pyautogui, pynput, and pystray.
+#
+# UNVERIFIED: this repo does not commit a lockfile compatible with the A1
+# workaround (build/agent-friday.lock does not exist yet — it was written
+# for the PR-3 git-tag-install path, which this isn't using). Editable
+# install from the full clone uses Agent-Friday's own pyproject.toml
+# dependency pins instead of a lockfile for now; a real uv.lock for this
+# path should be generated the first time this actually builds in CI,
+# not guessed here. Flagged in docs/VERIFY.md.
 
 # ── systemd units, config, and the OS layer (§8, §14) ────────────────────
 COPY image/systemd/friday.service              /usr/lib/systemd/system/friday.service

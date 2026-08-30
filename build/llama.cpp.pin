@@ -1,0 +1,11 @@
+# Resolved 2026-08-30 via `gh api repos/ggml-org/llama.cpp/releases/latest`
+# and `gh api repos/ggml-org/llama.cpp/git/refs/tags/v0.3.0` (docs/VERIFY.md
+# has the full commands/output). llama.cpp does not use stable semver in the
+# sense SPEC.md's own text warned about ("historically tags frequently with
+# b#### build numbers") — but as of this check its releases page uses vX.Y.Z
+# tags (v0.3.0 is the latest, published 2026-08-25), so that warning may be
+# stale relative to the repo's current tagging practice. Pinning by tag AND
+# commit SHA per docs/VERIFY.md's instruction to record the commit, not just
+# the tag name.
+v0.3.0
+c1d0e7a004015f23bc0233470b747b596f29b264
