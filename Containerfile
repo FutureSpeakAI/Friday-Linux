@@ -97,7 +97,8 @@ RUN dnf install -y git uv && dnf clean all
 # patch — clone the pinned tag in full, install it editable, then copy
 # data/ and skills/ out to the seed location friday-firstboot reads from.
 # Removed the moment PR-3 merges and build/agent-friday.pin moves past it.
-RUN AGENT_FRIDAY_TAG="$(grep -v '^#' build/agent-friday.pin | head -1)" && \
+COPY build/agent-friday.pin /tmp/agent-friday.pin
+RUN AGENT_FRIDAY_TAG="$(grep -v '^#' /tmp/agent-friday.pin | head -1)" && \
     git clone --branch "${AGENT_FRIDAY_TAG}" --depth 1 \
         https://github.com/FutureSpeakAI/Agent-Friday.git /usr/lib/friday/src && \
     uv venv /usr/lib/friday/venv && \
