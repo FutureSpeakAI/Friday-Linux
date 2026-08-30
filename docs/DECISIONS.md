@@ -282,6 +282,33 @@ figure below was re-checked with `git show v5.7.0:<path>` against the real
   cannot silently reappear and go unnoticed the way it did on the first
   pass.
 
+- **Deviation D-A6: reclaim GitHub runner disk space; stop caching uv
+  wheels inside the built layer.** CI run 33321625110 ran the runner out of
+  disk a third time — `no space left on device` while unpacking the venv-
+  install layer, after the llama-build stage (D-A5) had already used a
+  meaningful chunk of the runner's ~14 GiB free disk. Two independent
+  causes, both fixed: (1) `UV_CACHE_DIR=/tmp/uv-cache` (added for the
+  earlier `/root` symlink fix, see the `RUN` step's own comment) writes
+  every downloaded wheel into the build container's filesystem, where it
+  gets committed into the layer alongside the packages `uv` already
+  extracted into the venv — roughly doubling that layer's footprint for a
+  cache that is never read again after the `RUN` exits. Fixed by `rm -rf
+  /tmp/uv-cache` at the end of the same `RUN` (must be the same layer, or
+  the space isn't actually reclaimed — an earlier layer already paid for
+  it). (2) `build/build-llama.sh` left the full llama.cpp source + build
+  tree (object files for every CPU dispatch variant plus Vulkan shaders)
+  on disk after copying the built binaries out; even though the llama-build
+  stage's layers never reach the final image, podman/buildah still writes
+  every stage's layers to local storage during the build itself, so an
+  unclean build tree there still costs real disk for the whole job. Fixed
+  with `rm -rf "${SRC_DIR}"` at the end of the script. Additionally added a
+  "Free disk space on the runner" step to `build.yml`, removing GitHub's
+  preinstalled `.NET`, Android SDK/NDK, GHC, Azure CLI, and JVM toolchains
+  before the build starts — none of which this repo uses — for real,
+  measured headroom rather than relying on cache tuning alone against a
+  build that is genuinely disk-heavy (a C++ compile plus a ~90-package
+  Python venv, both in the same job).
+
 ## Blocking dependency: PR-1/2/3 not yet merged upstream
 
 §13's last paragraph is explicit: "Friday Linux M0 (Section 15) can start on

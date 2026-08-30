@@ -91,6 +91,18 @@ cp "${SRC_DIR}/build/bin/llama-server"      "${OUT_DIR}/llama-server-vulkan"
 cp "${SRC_DIR}/build/bin/llama-quantize"    "${OUT_DIR}/llama-quantize"
 cp "${SRC_DIR}/build/bin/llama-gguf-split"  "${OUT_DIR}/llama-gguf-split"
 
+# Remove the source + build tree now, in this same RUN/layer, rather than
+# leaving it for the Containerfile to clean up later: GitHub-hosted runners
+# have a tight disk budget (~14 GiB free), this repo's build already ran
+# out of space twice from other causes (docs/DECISIONS.md D-A3/D-A4), and a
+# full llama.cpp build tree with object files for every CPU dispatch
+# variant plus Vulkan shaders is not small. This builder stage's layers are
+# never referenced by the final image (only the three COPY --from=llama-
+# build files are), but podman/buildah still writes every stage's layers to
+# local storage during the build itself, so an uncleaned build tree here
+# still costs real disk for the whole build job, not just this stage.
+rm -rf "${SRC_DIR}"
+
 echo "build-llama.sh: done, binaries in ${OUT_DIR}"
 ls -la "${OUT_DIR}"
 

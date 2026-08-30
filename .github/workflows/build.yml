@@ -41,6 +41,23 @@ jobs:
           echo "::error::build/agent-friday.pin or build/llama.cpp.pin is unresolved — see docs/DECISIONS.md"
           exit 1
 
+      # GitHub-hosted ubuntu-latest runners ship ~14 GiB free by default,
+      # most of the rest of the disk pre-committed to toolchains this build
+      # never uses (a full .NET SDK, Android SDK/NDK, GHC, etc.). This build
+      # ran the runner out of disk THREE separate times before this step
+      # existed (docs/DECISIONS.md Deviations D-A3, D-A4, and the uv-cache
+      # fix next to this one) - compiling llama.cpp plus a ~90-package venv
+      # install is genuinely disk-heavy. Removing preinstalled toolchains
+      # this repo never touches reclaims real, measured headroom rather
+      # than guessing at cache tuning alone.
+      - name: Free disk space on the runner
+        run: |
+          echo "before:" && df -h /
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost \
+            "$AGENT_TOOLSDIRECTORY" /opt/hostedtoolcache /usr/local/lib/android \
+            /opt/az /usr/lib/jvm || true
+          echo "after:" && df -h /
+
       - name: podman build
         run: podman build -t friday-linux:testing -f Containerfile .
 

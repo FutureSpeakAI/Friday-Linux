@@ -142,7 +142,19 @@ RUN AGENT_FRIDAY_TAG="$(grep -v '^#' /tmp/agent-friday.pin | head -1)" && \
         "headroom-ai>=0.22" && \
     mkdir -p /usr/share/friday/seed && \
     cp -r /usr/lib/friday/src/data   /usr/share/friday/seed/data && \
-    cp -r /usr/lib/friday/src/skills /usr/share/friday/seed/skills
+    cp -r /usr/lib/friday/src/skills /usr/share/friday/seed/skills && \
+    rm -rf /tmp/uv-cache /usr/lib/friday/src/.git
+# The `rm -rf /tmp/uv-cache` above matters for more than tidiness: CI run
+# 33321625110 ran the GitHub runner out of disk space a third time, this
+# time on THIS layer, because UV_CACHE_DIR=/tmp/uv-cache writes every
+# downloaded wheel into the build container's own filesystem, where it gets
+# committed as part of the layer alongside the packages uv already
+# extracted into the venv — roughly doubling this layer's on-disk footprint
+# for no runtime benefit (the cache is never read again after this RUN
+# exits). Removing it in the same RUN/layer (so it never appears in the
+# layer's diff at all, rather than a later RUN which would still leave it
+# in an earlier layer) fixes that. `.git` in the shallow clone is a much
+# smaller second cleanup in the same spirit.
 #
 # Explicitly excluded per §6 and §18 rule 7 (prohibited shortcuts): the
 # [windows] extra, and therefore pyautogui, pynput, and pystray.
