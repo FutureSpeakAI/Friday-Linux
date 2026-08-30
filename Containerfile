@@ -148,6 +148,19 @@ RUN mkdir -p /var/home && \
         --groups video,render,audio friday \
     && passwd -l friday
 
+# ── Lockbox outer-mount point (SPEC.md §5, image/systemd/friday-lockbox.mount) ──
+# REAL BOOT FAILURE, CI run 33340378275: systemd refused
+# friday-lockbox.mount at boot ("Where= setting doesn't match unit name")
+# when Where= was /run/friday-lockbox. Confirmed against systemd's own
+# source that the unit's literal name only round-trips to /friday/lockbox
+# (see that unit file's own header for the full derivation) — moved
+# Where= there. /friday/lockbox must exist as a real directory in the
+# sealed image itself: mount does not need write access to its target at
+# runtime (fine on read-only /), but it does need the directory to already
+# exist, and nothing creates arbitrary new top-level directories on a
+# read-only root at runtime.
+RUN mkdir -p /friday/lockbox
+
 # ── Build-time-only tooling for the venv-install step below ──────────────
 # `git` (to clone Agent-Friday at the pin) and `uv` (to create the venv) are
 # not part of §6's BOM — they are not needed once the venv exists — but

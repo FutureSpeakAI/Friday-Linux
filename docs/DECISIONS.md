@@ -639,6 +639,33 @@ silently made, for each place the spec's text couldn't be used verbatim.
   This is an Amendment-A1-era workaround, not a permanent fixture: it goes
   away the moment PR-7 lands and the app itself understands OS mode.
 
+- **Deviation D-A17: `friday-lockbox.mount` moved from `Where=/run/friday-lockbox`
+  to `Where=/friday/lockbox` — a real boot failure, not a preemptive
+  guess.** CI run 33340378275 (the first successful QEMU boot of this
+  image, KVM confirmed working, OVMF fixed) got far enough to show
+  systemd itself refusing the unit at early boot: `friday-lockbox.mount:
+  Where= setting doesn't match unit name. Refusing.` Confirmed against
+  systemd's real source (`src/basic/unit-name.c`,
+  `unit_name_unescape()`): every literal `-` in a unit name is converted
+  back to `/` when deriving its expected path — there is no other
+  representation of `/` in a unit name, so a literal hyphen *within* a
+  single path component must be escaped as `\x2d` to survive
+  round-tripping. `/run/friday-lockbox` would therefore need to be named
+  `run-friday\x2dlockbox.mount`, not the literal `friday-lockbox.mount`
+  that SPEC.md's `friday.service` text (§8.1, kept verbatim) requires.
+  The only path whose escaped form is exactly `friday-lockbox.mount` is
+  `/friday/lockbox` (two real path components — the hyphen in the unit
+  name IS the separator representing that real `/`). Moved `Where=`
+  there; `/friday/lockbox` is now `mkdir -p`'d in the Containerfile so
+  the mountpoint directory exists in the sealed, read-only image (mount
+  needs an existing directory entry, not write access, at runtime).
+  `image/firstboot/wizard.py`'s `LOCKBOX_RUN_MOUNT` and
+  `friday-boot-test-probe.service`'s `btrfs subvolume list` call both
+  updated to match. This is the header comment's own long-standing
+  "FIRST-DRAFT / NEEDS REVIEW" flag getting resolved by the very thing
+  its text said was needed: "a real systemd install to check ... against,
+  which this sandbox cannot do" — now it can, via the boot test itself.
+
 - **Executable bits are set in the Containerfile, not relied on from git.**
   Confirmed via `git ls-files -s` after committing: every file this repo
   tracks landed as mode `100644`, including the `.sh` scripts and the

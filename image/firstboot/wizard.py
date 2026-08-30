@@ -46,7 +46,12 @@ UNATTENDED_FILE = ESP_MOUNT / "friday-unattended.yaml"
 # SPEC.md §5.
 LOCKBOX_DEVMAPPER_NAME = "friday-lockbox"
 LOCKBOX_DEVMAPPER_PATH = Path(f"/dev/mapper/{LOCKBOX_DEVMAPPER_NAME}")
-LOCKBOX_RUN_MOUNT = Path("/run/friday-lockbox")
+# SPEC.md's friday.service text names this unit "friday-lockbox.mount"
+# verbatim; systemd's own naming rule (confirmed the hard way — see that
+# unit file's header, CI run 33340378275) means the only Where= value
+# that literal name can validly have is /friday/lockbox, not
+# /run/friday-lockbox as originally drafted.
+LOCKBOX_RUN_MOUNT = Path("/friday/lockbox")
 SUBVOLUMES = ("@home", "@models", "@workshop", "@journal", "@snapshots")
 
 # (subvolume, mountpoint, extra mount options beyond "subvol=<name>,noatime")

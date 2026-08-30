@@ -45,7 +45,7 @@ ExecStart=/bin/sh -c '\
   echo "--- findmnt /boot/efi ---"; \
   findmnt -no SOURCE,TARGET,FSTYPE,OPTIONS /boot/efi 2>&1; \
   echo "--- lockbox subvolumes (btrfs subvolume list) ---"; \
-  btrfs subvolume list /run/friday-lockbox 2>&1; \
+  btrfs subvolume list /friday/lockbox 2>&1; \
   echo "--- lsblk ---"; \
   lsblk -o NAME,TYPE,FSTYPE,SIZE,MOUNTPOINT 2>&1; \
   echo "FRIDAY-BOOT-TEST-PROBE-END"'

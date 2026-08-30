@@ -15,7 +15,7 @@
 # per-subvolume units (home-friday.mount, var-lib-friday-models.mount,
 # var-lib-friday-workshop.mount, var-log-journal.mount) are written by
 # image/firstboot/ alongside /etc/crypttab, each with
-# "RequiresMountsFor=/run/friday-lockbox" so they gate on this unit, and
+# "RequiresMountsFor=/friday/lockbox" so they gate on this unit, and
 # friday.service's After=friday-lockbox.mount should arguably be
 # After=friday-lockbox.mount home-friday.mount var-lib-friday-models.mount —
 # but the spec's given friday.service text (§8.1) names only
@@ -25,6 +25,26 @@
 #
 # /etc/crypttab (written by the first-boot wizard, not this repo):
 #   friday-lockbox  UUID=<lockbox-partition-uuid>  none  luks
+#
+# REAL BOOT FAILURE, CI run 33340378275 (docs/DECISIONS.md): systemd
+# rejected this unit outright at boot — "friday-lockbox.mount: Where=
+# setting doesn't match unit name. Refusing." — with the previous Where=
+# value of /run/friday-lockbox. Confirmed against systemd's own source
+# (src/basic/unit-name.c, unit_name_unescape(): every literal '-' in a
+# unit name is converted back to '/' when deriving its path; there is no
+# other representation of '/' in a unit name). This means a literal hyphen
+# WITHIN a single path component must be escaped as \x2d to survive
+# round-tripping — "/run/friday-lockbox" would need to be named
+# "run-friday\x2dlockbox.mount", not the literal "friday-lockbox.mount"
+# that SPEC.md's friday.service text (§8.1, kept verbatim) requires. The
+# ONLY path whose escaped form is exactly "friday-lockbox.mount" is
+# "/friday/lockbox" (two real path components, "friday" then "lockbox" —
+# the hyphen in the unit name IS the separator representing that real
+# "/", not a literal character needing escaping). Moved Where= there.
+# "/friday/lockbox" is pre-created in the Containerfile (mkdir -p) so the
+# mountpoint directory exists in the sealed, read-only image — mount does
+# not need write access to create it at runtime, only an existing
+# directory entry to mount onto.
 #
 [Unit]
 Description=Friday lockbox (LUKS2 + btrfs top-level volume)
@@ -43,7 +63,7 @@ After=dev-mapper-friday\x2dlockbox.device
 
 [Mount]
 What=/dev/mapper/friday-lockbox
-Where=/run/friday-lockbox
+Where=/friday/lockbox
 Type=btrfs
 Options=subvolid=5,noatime
 

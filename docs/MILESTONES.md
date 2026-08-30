@@ -351,6 +351,58 @@ actual CI output, and iterate** — none of M0's remaining three checklist
 lines (QEMU boot + health, `bootc status`/`/usr` read-only, lockbox) are
 checked off below until real command output says so.
 
+**2026-08-30 — `boot-test.yml`'s long-standing "zero jobs" bug is fixed
+for real, and it now produces genuine, informative boot-test runs.**
+Dispatched four times against the real image, each run fixing one
+concrete, CI-proven bug (not a guess) — this is the actual "M0 build
+half was done, boot half was not" gap finally being closed:
+
+1. CI run 33339218662 (first real job this workflow has EVER produced):
+   got past KVM confirmation, OVMF/QEMU/gdisk install, and pulling the
+   image, then failed at `bootc-image-builder`'s ostree pull: `no space
+   left on device`. `boot-test.yml` never had the disk-reclaim step
+   `build.yml` already needed (Deviation D-A6) — copied it over.
+2. CI run 33339485078: `bootc-image-builder` actually printed "Build
+   complete!" but the step still failed — a `chmod output/*.raw` glob
+   didn't match because the real file is at `output/image/disk.raw`
+   (nested). Fixed to use `find` recursively, matching the pattern the
+   next step already used correctly.
+3. CI run 33339954425: the "Boot under QEMU/KVM with OVMF" step failed
+   silently. Real cause: Ubuntu's `ovmf` package ships
+   `OVMF_CODE_4M.fd`/`OVMF_VARS_4M.fd`, not plain `OVMF_CODE.fd` — grep
+   patterns matched nothing, both shell variables were silently empty,
+   `cp ""` failed with no visible message. Fixed to the real filenames
+   plus explicit non-empty assertions so a repeat of this exact class of
+   bug fails loudly instead of three steps later with no output.
+4. **CI run 33340378275 — real, substantial progress: KVM confirmed
+   working on GitHub-hosted `ubuntu-latest` (SPEC.md §16.2's own
+   assumption, now actually verified, not just trusted), OVMF fixed, and
+   the image genuinely boots**: GRUB menu renders, "Fedora Linux 44
+   (Forty Four) (ostree:0)" is selected and boots, the kernel loads,
+   `systemd[1]: Successfully made /usr/ read-only.` appears (a real,
+   very early, positive sign for the "/usr read-only" acceptance line),
+   SELinux policy loads, and systemd reaches real targets
+   (`sysinit.target`, `basic.target`, `local-fs.target`). It then hit a
+   real, systemd-refused unit: `friday-lockbox.mount: Where= setting
+   doesn't match unit name. Refusing.` Root-caused against systemd's own
+   source (not guessed) and fixed — see `docs/DECISIONS.md` Deviation
+   D-A17: `Where=` moved from `/run/friday-lockbox` to `/friday/lockbox`,
+   the only path whose escaped form matches the literal unit name
+   `friday-lockbox.mount` that SPEC.md's `friday.service` text requires.
+   `/api/health` did not respond within 300s on this run (expected —
+   without the crypttab/lockbox mount, `friday.service`'s
+   `Requires=friday-lockbox.mount` can never be satisfied, so it never
+   starts) — not yet a real M0 failure signal, since the actual blocker
+   (the mount unit being refused outright) is now fixed and unverified
+   against a fresh boot.
+
+**Not yet checked off — next boot-test dispatch is the check**: `/api/health`
+200 within 300s, `bootc status` one deployment, `/usr` read-only
+(confirmed promising in the console log above but not yet asserted by the
+probe unit, since the probe never got to run without the lockbox mounting
+and `.provisioned-unattended` marker existing), lockbox LUKS2/Argon2id
+with five subvolumes.
+
 ## M1-M4
 
 Not started. Per rule 4, they don't start until M0's checklist above is
