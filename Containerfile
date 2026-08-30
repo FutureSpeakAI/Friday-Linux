@@ -102,7 +102,17 @@ RUN dnf install -y \
 # become invisible under the mount, not deleted). Supplementary groups match
 # friday.service's SupplementaryGroups= line (§8.1); `video`/`render` exist
 # in the base image via Mesa, `audio` via PipeWire.
-RUN useradd --create-home --home-dir /home/friday --shell /bin/bash \
+#
+# `mkdir -p /var/home` first: ostree's standard layout makes /home a
+# symlink into /var/home (the same "/usr is the only truly immutable tree;
+# /home, /root, /mnt, /opt, /srv live under /var" convention that already
+# broke UV_CACHE_DIR's default path for /root earlier in this file — see
+# that comment). /var exists as a real, if sparse, directory at build time
+# (confirmed by that earlier fix), but /var/home does not until created,
+# so `useradd -m -d /home/friday` would otherwise try to create a home
+# directory through a symlink to a nonexistent target.
+RUN mkdir -p /var/home && \
+    useradd --create-home --home-dir /home/friday --shell /bin/bash \
         --groups video,render,audio friday \
     && passwd -l friday
 

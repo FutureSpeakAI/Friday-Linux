@@ -25,6 +25,12 @@ StandardOutput=journal+console
 StandardError=journal+console
 ExecStart=/bin/sh -c '\
   echo "FRIDAY-BOOT-TEST-PROBE-BEGIN"; \
+  echo "--- journalctl -u friday-firstboot (full) ---"; \
+  journalctl -u friday-firstboot --no-pager 2>&1; \
+  echo "--- journalctl -u friday.service (last 100 lines) ---"; \
+  journalctl -u friday.service --no-pager -n 100 2>&1; \
+  echo "--- systemctl list-units --failed ---"; \
+  systemctl list-units --failed --no-pager 2>&1; \
   echo "--- bootc status ---"; \
   bootc status --json 2>&1; \
   echo "--- /usr write test ---"; \
