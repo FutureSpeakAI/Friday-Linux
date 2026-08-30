@@ -171,6 +171,21 @@ tags; confirm the exact `cosign` invocation and `containers-policy.json`
 schema version against whatever `cosign` release CI actually pins, once CI
 is scaffolded.
 
+## 2026-08-30 — Fedora package availability: RESOLVED via actual CI `dnf install` (no COPR needed)
+
+CI run 33319006210 (`podman build` on `ubuntu-latest`) ran the full §6/§8 BOM
+`dnf install` against `registry.fedoraproject.org/fedora-bootc:44` for real:
+`linux-firmware mesa-vulkan-drivers vulkan-loader vulkan-tools NetworkManager
+NetworkManager-wifi nftables chrony pipewire wireplumber
+pipewire-pulseaudio bluez cage chromium caddy greenboot cryptsetup
+btrfs-progs google-noto-sans-fonts google-noto-emoji-color-fonts
+google-noto-sans-cjk-fonts`. All 271 transaction steps completed
+(`Complete!`), including `caddy-0:2.10.2-9.fc44` and `chromium-0:151.0.7...`
+straight from Fedora's own repos — **no COPR needed for `caddy`**, contrary
+to this file's earlier flag. Superseded: the `dnf repoquery` command listed
+above under "Fedora package availability for the §6/§8 BOM" is no longer
+needed; the real install is the stronger check and it passed.
+
 ## Explicitly not verified, and not to be guessed
 
 - Whether the specific §13 upstream PRs have actually been opened/merged
