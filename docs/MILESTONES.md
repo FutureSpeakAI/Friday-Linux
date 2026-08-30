@@ -18,9 +18,60 @@ baseline; Chromium managed policy; the polkit NetworkManager rule; the
 `ci/boot-test.yml` skeletons; `build/agent-friday.pin` (deliberately left
 unresolved — see below).
 
-**None of M0's acceptance checklist has been executed:**
-- [ ] `podman build` succeeds — **cannot run**: no `podman` in this
-      Windows sandbox, and even with one, the venv-install step is blocked.
+**2026-08-30, execution pass on GitHub Actions `ubuntu-latest` (this
+session): `podman build` now genuinely succeeds.** Real CI run, not a local
+guess: https://github.com/FutureSpeakAI/Friday-Linux/actions/runs/33320159178
+(job 99280596866, commit on `main` at push time). All 22 `STEP`s completed;
+final lines of the actual log:
+```
+STEP 22/22: RUN systemctl disable sshd.service
+COMMIT friday-linux:testing
+--> c1a3e545cee4
+Successfully tagged localhost/friday-linux:testing
+```
+Getting here from the prior "cannot run" state took five real, CI-verified
+bug fixes (each with its own commit and failing-run evidence), all recorded
+in full in `docs/DECISIONS.md`:
+1. Containerfile referenced `image/systemd/nvidia-suspend-override.conf`,
+   a file that was never authored — unconditional build failure (D-A2).
+2. The venv-install `RUN --mount=type=cache,target=/root/.cache/uv` failed
+   because `/root` doesn't exist yet in a Fedora bootc build container.
+3. The same `RUN` step read `build/agent-friday.pin` from a path that only
+   exists on the build host, not inside the container — never `COPY`'d in.
+4. `uv venv`/`uv pip install` failed under `$HOME=/root` because `/root` is
+   a symlink into `/var/roothome`, which doesn't exist at build time in a
+   bootc image (`/var` is state, populated at first real boot, not build
+   time) — fixed with `HOME=/tmp UV_CACHE_DIR=/tmp/uv-cache`.
+5. The `local` and `compression` (`headroom-ai[all]`) extras from §6's
+   given pip-extras list both silently pulled `torch` + a full CUDA wheel
+   stack on Linux (confirmed via two separate CI runs that ran the GitHub
+   runner out of disk space), a direct violation of SPEC.md §0 rule 7's
+   absolute prohibition on shipping `torch`. Fixed per Deviations D-A3/D-A4:
+   dropped `local` entirely (its feature — on-device embeddings — is
+   genuinely absent from the image now) and replaced Agent-Friday's
+   `compression` extra with a bare, extras-free `headroom-ai` install that
+   still satisfies the one thing Agent-Friday's code actually calls
+   (`from headroom import compress`, base package, graceful ImportError
+   fallback).
+
+A genuinely useful side-finding from the same run: the full §6/§8 Fedora
+package list (`chromium`, `caddy`, `cage`, `greenboot`, etc.) installed
+cleanly from Fedora 44's own repos with **no COPR needed for `caddy`**,
+contradicting this file's and `docs/VERIFY.md`'s earlier flag — recorded
+and superseded in `docs/VERIFY.md`.
+
+**Still not done, in progress:** `podman build` succeeding is necessary but
+not sufficient for the first M0 checklist line — GHCR push and cosign
+signing haven't been attempted yet (signing is explicitly out of scope per
+the executor's operating rules until a later milestone: no `COSIGN_*`
+secret exists or should be created). The `bootc-image-builder` step (next
+checklist line) is still a deliberate `exit 1` placeholder and is this
+session's next target.
+
+**Acceptance checklist, updated:**
+- [x] `podman build` succeeds (image `c1a3e545cee4`, tagged
+      `localhost/friday-linux:testing`, CI run 33320159178). NOT YET: pushed
+      to GHCR and signed — deliberately deferred, see above.
 - [ ] `bootc-image-builder` raw image ≤ 8 GB compressed — **cannot run**:
       same blocker, plus `docs/VERIFY.md`'s `disk.toml` schema question is
       still open.
@@ -33,36 +84,31 @@ unresolved — see below).
       this step rather than shipping unverified `cryptsetup` syntax (see
       `docs/DECISIONS.md` Deviations).
 
-**Why M0 cannot pass yet, ranked by how hard a blocker each is:**
+**Superseded (kept struck through for the record, not deleted, per §18 rule
+7's "record, don't silently overwrite"): the three blockers listed in the
+previous pass of this file** — unresolved `agent-friday.pin`, no Linux/KVM
+environment, and several unverified external facts — **are resolved as of
+Amendment A1 and this session's execution pass.** Amendment A1 pinned
+`agent-friday.pin` to `v5.7.0` and worked around PR-1/2/3 directly (see
+SPEC.md, "Amendment A1" and `docs/DECISIONS.md` Deviation D-A1); GitHub
+Actions' `ubuntu-latest` runners are the real Linux/KVM environment in use
+(no WSL2, no local podman — see the standing limitation note in
+`docs/VERIFY.md`, unchanged); Q4/Q5/llama.cpp pins were all resolved via
+registry API queries before this session started (`docs/VERIFY.md`,
+2026-08-30 entries). This session's own work is the fourth item —
+`disk.toml`'s schema — still open, tracked below.
 
-1. **`build/agent-friday.pin` is unresolved.** §13's own landing order
-   states M0 needs PR-1 through PR-3 merged into `Agent-Friday` upstream
-   first. Checked both `v5.7.0` and current `friday-desktop` HEAD: neither
-   exists. There is no tag or commit to install where `FRIDAY_OS_MODE` does
-   anything, `core/paths.py` exists, or the app installs from a git tag
-   without a full clone. This is `Agent-Friday`-repo work, not
-   `Friday-Linux`-repo work, and it gates everything downstream of it in
-   this checklist. **This is the critical path for the whole project right
-   now.**
-2. **No Linux/KVM build-and-boot environment.** This sandbox is Windows
-   11 with Git Bash/PowerShell only — no `podman`, no `bootc`, no
-   `bootc-image-builder`, no KVM. Even once (1) is resolved, M0's
-   acceptance checklist requires running these somewhere that can actually
-   run them: a real Linux machine, WSL2 with nested virtualization, or the
-   `ci/*.yml` workflows on GitHub's `ubuntu-latest` runners once this repo
-   has a remote (not created yet — see the note to Stephen below).
-3. **Several external facts are still unverified** per `docs/VERIFY.md`:
-   the exact Universal Blue base image ref (§17 Q4), the Fedora release to
-   pin (§17 Q5), the `llama.cpp` tag, Fedora package availability for the
-   full §6/§8 BOM, `bootc-image-builder`'s current `disk.toml` schema, and
-   the `cosign` invocation for §10.3. None of these block *authoring* the
-   scaffold — they block the Containerfile actually building.
-
-**Next concrete steps, in order:** get PR-1/2/3 opened and merged in
-`Agent-Friday` (or confirm a different plan for M0's app install — not this
-repo's call to make unilaterally); answer VERIFY.md's Q4/Q5 and the
-`disk.toml`/`cosign` questions; then run `ci/build.yml` and `ci/boot-test.yml`
-on a real Linux+KVM runner and record the actual results here.
+**Next concrete steps, in order:** (1) build `llama-server-vulkan` in a
+proper multi-stage Containerfile stage from `build/llama.cpp.pin`
+(`build/build-llama.sh` does not exist yet — M0 explicitly needs this
+binary per SPEC.md §15, it is not optional); (2) discover
+`bootc-image-builder`'s real `disk.toml` schema by having a CI step actually
+invoke `podman run --rm quay.io/centos-bootc/bootc-image-builder:latest
+--help` rather than guessing from old examples, then replace `build.yml`'s
+placeholder `exit 1` step with the real invocation; (3) get a raw image
+built and size-checked; (4) boot-test in QEMU/KVM (separate workflow,
+lower priority than build.yml per this session's mandate — see its own
+open CI quirk in `docs/VERIFY.md`).
 
 ## M1-M4
 
