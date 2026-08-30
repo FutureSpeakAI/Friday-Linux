@@ -256,6 +256,32 @@ figure below was re-checked with `git show v5.7.0:<path>` against the real
   are unavailable in the M0 image; the JSON/text/prose compression path
   `context_compressor.py` actually exercises is unaffected.
 
+- **Deviation D-A5: `build/build-llama.sh` now builds llama.cpp with
+  `-DBUILD_SHARED_LIBS=OFF`, static rather than CMake's shared-library
+  default.** CI run 33320543663 was the first to get the new `llama-build`
+  stage all the way to a successful `podman build` (after two rounds of
+  missing Vulkan-toolchain packages — `spirv-headers-devel`,
+  `glslang-devel` — fixed the same way, by reading what CI's own `dnf`/
+  `cmake` output actually said was missing). Reading that build's log
+  showed `llama-server`, `llama-quantize`, and `llama-gguf-split` were each
+  linked against a same-named shared library built alongside them
+  (`libllama-server-impl.so`, `libllama-quantize-impl.so`) plus
+  `libllama.so`/`libggml*.so`/`libggml-vulkan.so` — CMake's default for
+  this project. The Containerfile's `COPY --from=llama-build` lines only
+  copied the three executables, not any `.so` files, which would have
+  shipped a binary that fails at first run with a missing-shared-library
+  error — nothing in `podman build` executes the binary, so this would not
+  have surfaced until real boot testing. Fixed by adding
+  `-DBUILD_SHARED_LIBS=OFF` to the CMake configure line, which statically
+  links everything into the three executables — matching SPEC.md §14's own
+  plan of one self-contained file per binary at
+  `/usr/libexec/friday/llama-server-vulkan`, with no lib directory or
+  RPATH/`LD_LIBRARY_PATH` to manage. Added an `ldd`-based verification step
+  to `build-llama.sh` itself (fails the build if a binary still references
+  `libllama*`/`libggml*` or reports "not found") so this class of bug
+  cannot silently reappear and go unnoticed the way it did on the first
+  pass.
+
 ## Blocking dependency: PR-1/2/3 not yet merged upstream
 
 §13's last paragraph is explicit: "Friday Linux M0 (Section 15) can start on
