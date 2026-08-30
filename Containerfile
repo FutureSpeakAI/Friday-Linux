@@ -1,9 +1,12 @@
 # Friday Linux — SPEC.md §4.1 (base image), §6 (bill of materials)
 #
-# STATUS: buildable for M0 (no GPU) as of 2026-08-30 — Q4/Q5 resolved below.
-# Still blocked on one thing for the venv-install step, per Amendment A1:
-# build/agent-friday.pin now points at v5.7.0 (a real, working tag), so this
-# blocker is resolved for M0 too. See docs/DECISIONS.md "Deviation D-A1."
+# STATUS (2026-08-30): `podman build` succeeds end to end on GitHub Actions
+# `ubuntu-latest` (CI run 33320159178, image c1a3e545cee4 — see
+# docs/MILESTONES.md). Q4/Q5 resolved below; the venv-install step uses
+# Amendment A1's workaround (docs/DECISIONS.md Deviation D-A1); two silent
+# `torch`-pulling extras were found and removed (Deviations D-A3/D-A4). The
+# llama-build stage below (llama-server-vulkan) is newly wired up this pass
+# and not yet confirmed green in CI — that is this session's next check.
 #
 # One RUN per concern, per SPEC.md §18 rule 4, with the pin files read at
 # build time so a version bump is a one-line diff outside this file.
@@ -24,6 +27,30 @@
 # akmods-nvidia's current kmod, or (c) a different NVIDIA kmod source is
 # used. Flagging now rather than waiting for M2 to discover it. Recorded in
 # full, with the actual registry queries and their output, in docs/VERIFY.md.
+# ── Builder stage: llama-server-vulkan (§6 "Inference", §14 build-llama.sh) ──
+# Multi-stage so the compiler toolchain, llama.cpp's source tree, and Vulkan
+# -devel headers never land in the shipped image — only the built binaries
+# get COPYed into the final stage below. Uses the same digest-pinned Fedora
+# 44 base as the runtime image (confirmed to have working dnf/repos in the
+# runtime-stage build already) rather than introducing a second, unverified
+# base image reference.
+#
+# UNVERIFIED (see build/build-llama.sh's own header and docs/VERIFY.md): the
+# exact Fedora 44 package names for Vulkan headers/loader-devel and the
+# GLSL-to-SPIR-V shader compiler llama.cpp's Vulkan backend needs at build
+# time. Best-effort list below; CI's dnf install step is the real check.
+FROM registry.fedoraproject.org/fedora-bootc:44@sha256:e8f93cc9b1a0089216c674d5d9e8319e8cc40911dc9ee23d07d49ceea5177590 AS llama-build
+RUN dnf install -y \
+        git cmake gcc-c++ make \
+        vulkan-headers vulkan-loader-devel vulkan-tools \
+        glslc \
+    && dnf clean all
+COPY build/llama.cpp.pin   /tmp/llama.cpp.pin
+COPY build/build-llama.sh  /tmp/build-llama.sh
+RUN chmod +x /tmp/build-llama.sh && \
+    /tmp/build-llama.sh /tmp/llama.cpp.pin /out /tmp/llama.cpp
+
+# ── Runtime stage ─────────────────────────────────────────────────────────
 FROM registry.fedoraproject.org/fedora-bootc:44@sha256:e8f93cc9b1a0089216c674d5d9e8319e8cc40911dc9ee23d07d49ceea5177590
 
 # ── System packages (§6 "System") ────────────────────────────────────────
@@ -73,15 +100,13 @@ RUN dnf install -y git uv && dnf clean all
 # D-A2 in docs/DECISIONS.md.
 
 # ── Inference binaries (§6 "Inference") ──────────────────────────────────
-# NOT YET BUILT. build/build-llama.sh builds llama-server-cuda and
-# llama-server-vulkan from the pinned tag in build/llama.cpp.pin (currently
-# also unpinned — see docs/VERIFY.md "ggml-org/llama.cpp tag to pin"). Until
-# that pin exists this COPY has nothing to copy from; left here as the
-# documented target per §14's layout rather than silently omitted.
-# COPY --from=llama-build /out/llama-server-cuda   /usr/libexec/friday/llama-server-cuda
-# COPY --from=llama-build /out/llama-server-vulkan /usr/libexec/friday/llama-server-vulkan
-# COPY --from=llama-build /out/llama-quantize      /usr/libexec/friday/llama-quantize
-# COPY --from=llama-build /out/llama-gguf-split    /usr/libexec/friday/llama-gguf-split
+# M0 needs llama-server-vulkan only (SPEC.md §15: "no GPU"). llama-server-cuda
+# is M2 scope (needs a CUDA-toolkit builder image and compute-capability
+# flags per §6, neither of which exists yet) and is deliberately not built
+# here — copying it in would be presenting an unbuilt binary as done.
+COPY --from=llama-build /out/llama-server-vulkan /usr/libexec/friday/llama-server-vulkan
+COPY --from=llama-build /out/llama-quantize      /usr/libexec/friday/llama-quantize
+COPY --from=llama-build /out/llama-gguf-split    /usr/libexec/friday/llama-gguf-split
 
 # ── Voice assets (§6 "Voice") ─────────────────────────────────────────────
 # NOT YET FETCHED. Piper voice name and Whisper small.en CTranslate2 INT8
