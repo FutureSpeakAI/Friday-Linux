@@ -355,3 +355,20 @@ customisation schema — still unverified per the entry above), and
 planned lockfile assumed). These block `build.yml` from getting past its
 next step once pins stop being the first failure; left for the M0 execution
 pass rather than authored here without ever having run them.
+
+## 2026-08-30 — Unresolved CI quirk: `boot-test.yml` fails pre-job with "workflow file issue"
+
+On both pushes so far, `.github/workflows/boot-test.yml` completes as a
+failed run with **zero jobs created** (`gh api .../jobs` returns
+`{"total_count":0}`, no check-run output text available via the API) even
+though its YAML validates by inspection (no CRLF, no BOM, no tabs, correct
+2-space indentation — checked with `cat -A` on the exact committed blob via
+`git show`). GitHub's UI attributes it to "a workflow file issue" but the
+API surfaces no annotation explaining which line/key. Its trigger is
+`workflow_run: workflows: [build]` (matching `build.yml`'s `name: build`,
+confirmed via the registered-workflows list) plus `workflow_dispatch:`.
+Not chased further because every step in this file is a placeholder TODO
+(SPEC.md §16.2 isn't implementable until M0's build succeeds) — nothing of
+substance runs there yet regardless. Whoever picks up the boot-test
+implementation for real should re-diagnose this from scratch rather than
+assume the trigger block above is correct just because it looks right.
