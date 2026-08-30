@@ -1,14 +1,21 @@
 # Friday Linux — SPEC.md §14 (ci/build.yml), §6 size budget (G7).
 #
-# NOT YET RUNNABLE: this workflow calls `podman build` on the Containerfile,
-# which is itself blocked (see Containerfile header and
-# docs/DECISIONS.md "Blocking dependency: PR-1/2/3 not yet merged
-# upstream"). Written now so the structure exists and the size-check /
-# signing steps are ready the moment the venv-install step can run.
+# STATUS (2026-08-30): `podman build` succeeds (CI run 33320543663, image
+# tagged localhost/friday-linux:testing, includes the llama-server-vulkan
+# build stage). The `bootc-image-builder` step below is newly written this
+# pass and not yet confirmed — its exact CLI invocation and whether
+# --privileged/loop-device access work on a GitHub-hosted runner are this
+# session's next real check, not assumed. It deliberately omits a custom
+# `build/disk.toml` for now (see the step's own comment and docs/VERIFY.md)
+# rather than guess a TOML schema this sandbox cannot verify.
 #
 # Needs GitHub Actions repo/org secrets not yet provisioned: COSIGN_*
 # (SPEC.md §10.3) — not created here per the instruction not to touch
-# GitHub remotes/secrets without telling Stephen first.
+# GitHub remotes/secrets without telling Stephen first. The GHCR push step
+# does not exist yet either (SPEC.md's M0 checklist line covers both
+# push-and-sign together; push uses the built-in GITHUB_TOKEN, no secret to
+# create, but is sequenced after the raw-image and size-check steps below
+# actually work).
 name: build
 
 on:
@@ -37,14 +44,50 @@ jobs:
       - name: podman build
         run: podman build -t friday-linux:testing -f Containerfile .
 
-      - name: Produce raw image (bootc-image-builder)
+      - name: Discover bootc-image-builder CLI (docs/VERIFY.md disk.toml question)
         run: |
-          echo "UNVERIFIED (docs/VERIFY.md): exact bootc-image-builder invocation and build/disk.toml schema not confirmed" >&2
-          exit 1  # deliberately fails until VERIFY.md's disk.toml question is answered
+          mkdir -p output
+          echo "--- bootc-image-builder --help ---"
+          podman run --rm quay.io/centos-bootc/bootc-image-builder:latest --help
+
+      - name: Produce raw image (bootc-image-builder)
+        # UNVERIFIED (docs/VERIFY.md): build/disk.toml's exact partition-
+        # customization schema is not confirmed from this sandbox, so this
+        # first pass deliberately omits --config and takes
+        # bootc-image-builder's default disk layout for --type raw. That is
+        # enough to satisfy M0's literal checklist line ("produces a raw
+        # image <= 8 GB compressed") without guessing TOML syntax that the
+        # previous --help step didn't confirm. SPEC.md Section 5's exact
+        # partition sizes (16 GiB fixed root, remainder left free for the
+        # lockbox) still need a verified build/disk.toml before M1, which
+        # needs the lockbox to actually fit — tracked in docs/DECISIONS.md
+        # and docs/VERIFY.md, not silently treated as done here.
+        run: |
+          sudo podman run --rm \
+            --privileged \
+            --security-opt label=type:unconfined_t \
+            -v "$(pwd)/output:/output" \
+            -v /var/lib/containers/storage:/var/lib/containers/storage \
+            quay.io/centos-bootc/bootc-image-builder:latest \
+            --type raw \
+            --local \
+            localhost/friday-linux:testing
+          ls -la output/
 
       - name: Size check (G7)
         run: |
-          echo "TODO: fail if compressed raw image exceeds 8 GB, per SPEC.md G7"
+          set -euo pipefail
+          RAW="$(find output -name '*.raw' -o -name 'disk.raw' | head -1)"
+          if [[ -z "${RAW}" ]]; then
+            echo "::error::no .raw image found under output/ to size-check" >&2
+            exit 1
+          fi
+          COMPRESSED_MIB=$(xz -T0 -c "${RAW}" | wc -c | awk '{printf "%d", $1/1024/1024}')
+          echo "compressed size: ${COMPRESSED_MIB} MiB (budget: 8192 MiB, SPEC.md G7)"
+          if (( COMPRESSED_MIB > 8192 )); then
+            echo "::error::compressed raw image is ${COMPRESSED_MIB} MiB, over the 8 GiB G7 budget" >&2
+            exit 1
+          fi
 
       - name: Sign with cosign (keyless, GitHub OIDC)
         run: |

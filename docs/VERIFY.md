@@ -204,6 +204,33 @@ dnf repoquery --available vulkan-headers vulkan-loader-devel vulkan-tools glslc 
 dnf provides '*/glslc'
 ```
 
+## 2026-08-30 — `build/disk.toml`: still deferred, deliberately, not guessed
+
+Per this file's own long-standing entry above ("`bootc-image-builder` disk
+customisation syntax for `build/disk.toml`"), the exact TOML schema for
+partition customization has never been confirmed from this sandbox. Rather
+than guess it and burn a ~20-minute CI round trip (this build's `podman
+build` step alone now takes that long, dominated by compiling llama.cpp) on
+a wrong schema, `.github/workflows/build.yml`'s "Produce raw image" step
+first runs `bootc-image-builder --help` (logged in full, so a human or a
+future session can read the real current CLI surface directly from CI
+output) and then builds the raw image with **no** `--config`/`disk.toml` at
+all — accepting bootc-image-builder's default disk layout for `--type raw`.
+This satisfies M0's literal acceptance line ("`bootc-image-builder` produces
+a raw image ≤ 8 GB compressed") without a disk.toml. SPEC.md §5's exact
+partition scheme (16 GiB fixed root, remainder left unpartitioned for the
+first-boot wizard to claim as the lockbox) is NOT yet expressed anywhere —
+that is a real gap against a DECIDED section, tracked here rather than
+silently treated as satisfied, and needs a `build/disk.toml` before M1
+(whose wizard assumes that free space exists to `luksFormat`). The command
+to derive the real schema once `--help`'s CI output is read:
+```sh
+podman run --rm quay.io/centos-bootc/bootc-image-builder:latest --help
+# and, if --help references a --config schema doc or a --help-config flag,
+# follow up on that rather than guessing from older bootc-image-builder
+# examples found elsewhere, since the schema has changed across releases.
+```
+
 ## Explicitly not verified, and not to be guessed
 
 - Whether the specific §13 upstream PRs have actually been opened/merged
