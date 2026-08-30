@@ -356,6 +356,36 @@ depends on PR-1/2/3's code existing — only the final `podman build` step
 Per rule 7: the smallest change that preserves intent, recorded rather than
 silently made, for each place the spec's text couldn't be used verbatim.
 
+- **Deviation D-A8: Workstream A's final tag is `v5.9.0`, not `v5.8.0`.**
+  The orchestrator's dispatch brief named `v5.8.0` as the tag Workstream A
+  (the five upstream Agent-Friday PRs) ends at, and named it as the value
+  `build/agent-friday.pin` and this repo's greenboot/health-contract
+  restoration (dispatch Step B5) move to once Workstream A completes. Before
+  any of the five PRs landed, an entirely unrelated feature (a weekly
+  update-check, PR #7 on `Agent-Friday`) merged to `main` and was tagged and
+  **published as a public GitHub Release under `v5.8.0`** first. That tag is
+  live and may already be downloaded; it is not to be moved, forced, or
+  deleted. Workstream A's target is therefore corrected to **`v5.9.0`** —
+  the next version after what's actually shipped, not a renumbering of
+  anything already public. Nothing in this repo's `SPEC.md` (Amendment A1)
+  or `DECISIONS.md`/`VERIFY.md`/`MILESTONES.md` referenced `v5.8.0` by name
+  before this entry (confirmed by a repo-wide grep before writing this), so
+  no other document needed correcting — only Step B5's future action (not
+  yet started; blocked on Workstream A finishing) is affected, and it now
+  reads `v5.9.0` wherever the original dispatch said `v5.8.0`.
+
+- **PR-6 (health contract, not yet started) must build on
+  `services/app_version.py`, not add a fourth version source.** The same
+  update-check feature that claimed `v5.8.0` also added
+  `services/app_version.py` as the single source of truth for "what version
+  is actually running," replacing three prior separate implementations —
+  including one inside `/api/health` that fell back to a hardcoded
+  `"5.0.0"`. A committed test, `test_one_version_source.py`, fails if a
+  second implementation reappears. PR-6's `/api/health` schema work must
+  read its version field from `app_version.py`'s existing function, not
+  reintroduce a fourth answer. Recorded here so whoever picks up PR-6 (after
+  PR-2 and PR-5) inherits this constraint rather than rediscovering it.
+
 - **`[Install]` sections added to every systemd unit.** §8.1 gives
   `friday.service`'s `[Unit]`/`[Service]` blocks verbatim with no
   `[Install]` section; without one, `systemctl enable` (which the
