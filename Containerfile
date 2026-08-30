@@ -102,19 +102,27 @@ RUN dnf install -y \
 # become invisible under the mount, not deleted). Supplementary groups match
 # friday.service's SupplementaryGroups= line (§8.1).
 #
-# CORRECTED (CI run 33334408813, real failure, not guessed): the original
-# version of this comment assumed `video`/`render`/`audio` already exist
-# via Mesa/PipeWire's package scriptlets. They do not, at this point in a
-# container build: `useradd: group 'video' does not exist` (and same for
-# `render`, `audio`) — real error output. These groups are defined via
-# those packages' `sysusers.d` drop-ins, which are applied by
-# `systemd-sysusers.service` at first BOOT, not during `dnf install` inside
-# a `podman build` layer (no init system is running to apply them). Fixed
-# by creating them explicitly with `groupadd -f` (idempotent — a no-op if
-# the group already exists) before `useradd`. When `systemd-sysusers` runs
-# for real at first boot, it treats an existing group of the same name as
-# already satisfied — this does not conflict with sysusers.d's own
-# creation of the same groups.
+# CORRECTED TWICE (CI runs 33334408813 and 33335275371, real failures, not
+# guessed): the original version of this comment assumed `video`/`render`/
+# `audio` already exist via Mesa/PipeWire's package scriptlets. They do
+# not, at this point in a container build — `useradd: group 'video' does
+# not exist` (and same for `render`, `audio`). The first fix tried,
+# `groupadd -f video` (idempotent-by-design: exits 0 if the group already
+# exists), produced NO output at all (groupadd is silent on every success
+# path) and yet `useradd` immediately after still reported all three
+# groups missing — meaning `groupadd` itself believed it succeeded (or
+# had nothing to do) while `useradd`'s own NSS lookup could not see the
+# result. Rather than guess a second time at why (a plausible but
+# unconfirmed theory: some of these groups exist only via `nss-systemd`'s
+# dynamic-user mechanism, which requires a running systemd instance to
+# resolve — absent inside a `podman build` layer — so `groupadd -f` treats
+# them as "already there" via that same broken lookup, silently skips
+# real creation, and `useradd`'s classic NSS "files" path then finds
+# nothing), this fix bypasses the ambiguity entirely: append directly to
+# `/etc/group` with a freshly computed, guaranteed-unused GID for any name
+# not already present. This is materially the same file `groupadd` itself
+# writes for a "files"-backed group — no NSS module indirection involved,
+# so there is no dynamic-lookup path left for it to be invisible through.
 #
 # `mkdir -p /var/home` first: ostree's standard layout makes /home a
 # symlink into /var/home (the same "/usr is the only truly immutable tree;
@@ -125,7 +133,17 @@ RUN dnf install -y \
 # so `useradd -m -d /home/friday` would otherwise try to create a home
 # directory through a symlink to a nonexistent target.
 RUN mkdir -p /var/home && \
-    groupadd -f video && groupadd -f render && groupadd -f audio && \
+    NEXT_GID=$(awk -F: '{print $3}' /etc/group | sort -n | tail -1) && \
+    for g in video render audio; do \
+        if ! grep -q "^${g}:" /etc/group; then \
+            NEXT_GID=$((NEXT_GID + 1)); \
+            echo "${g}:x:${NEXT_GID}:" >> /etc/group; \
+            echo "created ${g} with GID ${NEXT_GID}"; \
+        else \
+            echo "${g} already present in /etc/group, not touching it"; \
+        fi; \
+    done && \
+    tail -5 /etc/group && \
     useradd --create-home --home-dir /home/friday --shell /bin/bash \
         --groups video,render,audio friday \
     && passwd -l friday
