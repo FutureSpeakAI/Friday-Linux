@@ -43,7 +43,7 @@ FROM registry.fedoraproject.org/fedora-bootc:44@sha256:e8f93cc9b1a0089216c674d5d
 RUN dnf install -y \
         git cmake gcc-c++ make \
         vulkan-headers vulkan-loader-devel vulkan-tools \
-        glslc \
+        glslc spirv-headers-devel glslang-devel \
     && dnf clean all
 COPY build/llama.cpp.pin   /tmp/llama.cpp.pin
 COPY build/build-llama.sh  /tmp/build-llama.sh
