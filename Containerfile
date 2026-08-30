@@ -112,13 +112,32 @@ RUN AGENT_FRIDAY_TAG="$(grep -v '^#' /tmp/agent-friday.pin | head -1)" && \
         https://github.com/FutureSpeakAI/Agent-Friday.git /usr/lib/friday/src && \
     HOME=/tmp UV_CACHE_DIR=/tmp/uv-cache uv venv /usr/lib/friday/venv && \
     HOME=/tmp UV_CACHE_DIR=/tmp/uv-cache uv pip install --python /usr/lib/friday/venv/bin/python \
-        -e "/usr/lib/friday/src[voice-local-lite,local,compression,federation,google,compose,provenance]" && \
+        -e "/usr/lib/friday/src[voice-local-lite,compression,federation,google,compose,provenance]" && \
     mkdir -p /usr/share/friday/seed && \
     cp -r /usr/lib/friday/src/data   /usr/share/friday/seed/data && \
     cp -r /usr/lib/friday/src/skills /usr/share/friday/seed/skills
 #
 # Explicitly excluded per §6 and §18 rule 7 (prohibited shortcuts): the
 # [windows] extra, and therefore pyautogui, pynput, and pystray.
+#
+# Deviation D-A3 (see docs/DECISIONS.md): §6's given extras list is
+# "[voice-local-lite,local,compression,federation,google,compose,provenance]"
+# — this Containerfile installs everything in that list EXCEPT `local`.
+# `local` = ["sentence-transformers>=2.2", "chromadb>=0.5"] per
+# Agent-Friday's pyproject.toml at v5.7.0, and sentence-transformers hard-
+# depends on torch + transformers. CI run 33319580279 resolved
+# torch==2.13.0 plus a full CUDA wheel stack (nvidia-cublas, nvidia-cudnn,
+# triton, etc.) the instant `local` was in the extras list, then ran the
+# GitHub runner out of disk space trying to write them. §0 rule 7 prohibits
+# "adding torch to the image" unconditionally, regardless of convenience,
+# and §1.1 states plainly that local voice is CTranslate2/ONNX and the
+# packaged product does not ship torch — so this is not a resource problem
+# to work around, it is the DECIDED rule already telling us the right
+# answer. `local`'s on-device embeddings/memory capability is therefore
+# NOT in the M0 image; re-adding it needs either a torch-free embedding
+# path (e.g. an ONNX sentence-embedding model, consistent with the ONNX
+# path already used for voice) or a decision from Stephen to relax rule 7,
+# neither of which is this executor's call to make unilaterally.
 #
 # UNVERIFIED: this repo does not commit a lockfile compatible with the A1
 # workaround (build/agent-friday.lock does not exist yet — it was written

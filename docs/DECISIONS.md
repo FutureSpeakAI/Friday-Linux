@@ -193,6 +193,35 @@ figure below was re-checked with `git show v5.7.0:<path>` against the real
   actually adds the NVIDIA layer) add both the service and its override
   together.
 
+- **Deviation D-A3: dropped the `local` extra from the venv-install step,
+  because it silently pulls `torch` in violation of §0 rule 7.** Found by
+  actually running the venv-install `RUN` step in CI (run 33319580279,
+  2026-08-30): `uv pip install -e ".[voice-local-lite,local,compression,
+  federation,google,compose,provenance]"` resolved `torch==2.13.0` plus a
+  full CUDA 13 wheel stack (`nvidia-cublas`, `nvidia-cudnn-cu13`,
+  `nvidia-cufft`, `triton`, ten-plus `nvidia-*` packages in all), which then
+  exhausted the GitHub runner's disk ("no space left on device") while
+  writing `torch/lib/libtorch_cpu.so` into the layer. Traced the cause to
+  Agent-Friday's own `pyproject.toml` at v5.7.0: `local = ["sentence-
+  transformers>=2.2", "chromadb>=0.5"]`, and `sentence-transformers` hard-
+  depends on `torch` and `transformers`. This is not a disk-space problem to
+  work around with a bigger runner or a CPU-only torch index — §0 rule 7
+  lists "adding `torch` to the image" as a prohibited shortcut
+  unconditionally ("regardless of convenience"), and §1.1's non-goals table
+  says outright: "Bundling PyTorch... the packaged product does not ship
+  torch. Local voice is CTranslate2 and ONNX." §6's own extras list names
+  `local` anyway — that's the spec not accounting for what `local` actually
+  installs, i.e. exactly the "cannot work as written" case rule 7 (§18)
+  describes. Smallest fix preserving intent: install everything else in
+  §6's extras list, omit `local`. Consequence: the M0 (and, until resolved,
+  later) image ships without on-device semantic memory/embeddings
+  (`sentence-transformers`/`chromadb`). Re-adding it needs either a
+  torch-free embedding path (there is prior art for this exact pattern one
+  extra over: `voice-local-lite` explicitly chose `faster-whisper` +
+  `onnxruntime` over a torch-based ASR stack for the same reason) or an
+  explicit decision from Stephen to relax rule 7 — not something this
+  executor can decide unilaterally either way. Flagged for M1+ planning.
+
 ## Blocking dependency: PR-1/2/3 not yet merged upstream
 
 §13's last paragraph is explicit: "Friday Linux M0 (Section 15) can start on
