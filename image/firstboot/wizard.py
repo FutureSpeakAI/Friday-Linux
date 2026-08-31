@@ -68,9 +68,28 @@ def _log(msg: str) -> None:
 
 
 def _run(cmd: list[str], *, input_bytes: bytes | None = None, check: bool = True) -> subprocess.CompletedProcess:
+    """Every prior version of this function used capture_output=True and
+    never printed the captured stdout/stderr anywhere — meaning every
+    command failure so far (e.g. CI run 33343357304's `sgdisk` exit status
+    4) has been diagnosed blind: the journal only ever showed the raised
+    CalledProcessError's own repr (command + return code), never the
+    tool's own error message explaining WHY. friday-firstboot.service's
+    stdout/stderr already go to the journal (systemd's default), and
+    friday-boot-test-probe.service already dumps that journal to the
+    console — so printing the captured output here, always, is enough to
+    make it visible without changing anything else.
+    """
     _log(f"$ {' '.join(cmd)}")
-    return subprocess.run(cmd, input=input_bytes, check=check,
-                           capture_output=True, text=False)
+    result = subprocess.run(cmd, input=input_bytes, check=False,
+                             capture_output=True, text=False)
+    for stream_name, data in (("stdout", result.stdout), ("stderr", result.stderr)):
+        if data:
+            text = data.decode("utf-8", errors="replace").rstrip()
+            if text:
+                _log(f"  {stream_name}: {text}")
+    if check and result.returncode != 0:
+        raise subprocess.CalledProcessError(result.returncode, cmd, result.stdout, result.stderr)
+    return result
 
 
 def load_unattended() -> dict:

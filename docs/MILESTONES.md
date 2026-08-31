@@ -403,6 +403,33 @@ probe unit, since the probe never got to run without the lockbox mounting
 and `.provisioned-unattended` marker existing), lockbox LUKS2/Argon2id
 with five subvolumes.
 
+**2026-08-30/31 — CI run 33343357304: the `friday-lockbox.mount` fix
+worked, real progress moved further into the wizard, and a new real bug
+was found (and a real diagnostic gap fixed alongside it).** Console log
+confirms: `friday-lockbox.mount` no longer gets refused by systemd (the
+earlier "Where= doesn't match unit name" is gone) — it now behaves
+exactly as a normal first-boot should, timing out waiting for a device
+that legitimately doesn't exist yet (`Timed out waiting for device
+dev-mapper-friday\x2dlockbox.device`), with `friday.service` correctly
+reporting `Dependency failed` as a result (expected, not a bug — the
+lockbox genuinely isn't there yet). `friday-firstboot.service` started,
+found the unattended file, resolved the real boot disk as `/dev/vda`
+(confirms `find_root_disk()`'s `/sysroot`-based logic works on this real
+ostree layout), and then failed at `sgdisk -n 0:0:0 -t 0:8309 -c
+0:friday-lockbox /dev/vda` with exit status 4 — but with no visible error
+message, because `wizard.py`'s `_run()` used `capture_output=True` and
+never printed anything it captured on failure. **Every command failure
+so far in this wizard has been diagnosed blind** — fixed now: `_run()`
+prints captured stdout/stderr unconditionally (they already land in the
+journal via `friday-firstboot.service`'s default IO, which
+`friday-boot-test-probe.service` already dumps to the console), so the
+next run will show `sgdisk`'s own real error text instead of just a bare
+exit code. Confirmed via the host-side "Grow the disk" step's own real
+`sgdisk -p` output that 4.0 GiB of genuine free space exists on the raw
+file before boot (`Total free space is 8386594 sectors (4.0 GiB)`), so
+"no free space" is not the obvious suspect — the real cause is still
+open pending the next run's actual error text.
+
 ## M1-M4
 
 Not started. Per rule 4, they don't start until M0's checklist above is
