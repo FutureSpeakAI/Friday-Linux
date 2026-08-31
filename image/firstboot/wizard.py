@@ -65,8 +65,22 @@ LOCKBOX_RUN_MOUNT = Path("/friday/lockbox")
 SUBVOLUMES = ("@home", "@models", "@workshop", "@journal", "@snapshots")
 
 # (subvolume, mountpoint, extra mount options beyond "subvol=<name>,noatime")
+#
+# REAL BUG, CI run 33375529053: `home-friday.mount` failed with
+# "Mount path /home/friday is not canonical (contains a symlink)." —
+# systemd's .mount units categorically refuse a Where= path with a
+# symlink component (unlike an ad-hoc `mount` command, which happily
+# follows symlinks). /home is the same ostree /home -> /var/home symlink
+# already documented elsewhere in this file (see the friday user's
+# useradd comment in the Containerfile). Fixed by mounting at the real,
+# canonical path /var/home/friday instead — /home/friday still reaches
+# the exact same place transparently through the symlink for every other
+# consumer (Agent-Friday's Path.home(), /etc/passwd's recorded home dir,
+# etc.), so nothing else needed to change. The other three subvolumes
+# were unaffected (their paths never pass through /home, /root, /mnt,
+# /opt, or /srv — the only symlinked top-level dirs in this layout).
 SUBVOLUME_MOUNTS = (
-    ("@home", Path("/home/friday"), "compress=zstd:1"),
+    ("@home", Path("/var/home/friday"), "compress=zstd:1"),
     ("@models", Path("/var/lib/friday/models"), None),
     ("@workshop", Path("/var/lib/friday/workshop"), "compress=zstd:1"),
     ("@journal", Path("/var/log/journal"), None),

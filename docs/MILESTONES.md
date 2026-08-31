@@ -640,6 +640,33 @@ case either of those turns out to work where `-u friday-firstboot`
 doesn't. Not yet re-verified — next dispatch should finally reveal why
 `@home` specifically fails to mount.
 
+**2026-08-31 — CI run 33375529053: the plain-file log workaround worked
+completely, and the real `@home` failure reason is now known for
+certain.** `/var/log/friday-firstboot.log`'s content (surfaced via the
+probe) shows the whole wizard run end to end for the first time,
+including the exact error `journalctl -u home-friday.mount` gave:
+`home-friday.mount: Mount path /home/friday is not canonical (contains a
+symlink). Failed with result 'resources'.` systemd's `.mount` units
+categorically refuse a `Where=` path with any symlink component — `/home`
+is a symlink to `/var/home` on this ostree image (the same convention
+that already broke `/root`'s default `uv` cache path and `useradd -m`
+earlier in this project). The other three subvolume mounts
+(`@models`/`@workshop`/`@journal`) succeeded without error, confirming
+their paths don't cross a symlinked top-level directory. **Fixed**:
+`@home` now mounts at the real, canonical `/var/home/friday` instead of
+`/home/friday` — the symlink still transparently resolves everyone else's
+`/home/friday` references (Agent-Friday's `Path.home()`, `/etc/passwd`'s
+recorded home dir, this same wizard's own `os.chown`/`os.walk` calls) to
+the exact same place. This also plausibly explains why `friday.service`
+itself reported "A dependency job for friday.service failed" even after
+`.firstboot-done` was written and this wizard explicitly ran `systemctl
+start friday.service`: SPEC.md §8.1's `ReadWritePaths=/home/friday` on
+that unit causes systemd to implicitly add
+`RequiresMountsFor=/home/friday`, which was failing right alongside the
+explicit `home-friday.mount` unit — fixing the mount should resolve both
+in the same run. Not yet re-verified — next dispatch is the real test of
+whether `friday.service` (and therefore `/api/health`) finally comes up.
+
 ## M1-M4
 
 Not started. Per rule 4, they don't start until M0's checklist above is
