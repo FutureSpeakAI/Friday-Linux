@@ -233,6 +233,31 @@ jobs:
         run: |
           sudo grep -q 'USR_WRITABLE=no' /tmp/console.log
 
+      - name: Assert bootc status shows exactly one deployment
+        # SPEC.md §15 M0 acceptance line. Schema confirmed for real
+        # (docs/VERIFY.md) via repeated CI runs, e.g. run 33438580570:
+        # "booted" present, "staged" and "rollback" both null is exactly
+        # the one-deployment case this line asks for. Previously this
+        # workflow only displayed the raw JSON for a human to eyeball —
+        # this makes the check real and regression-proof.
+        run: |
+          LINE="$(sudo grep -o '{"apiVersion".*}' /tmp/console.log | head -1)"
+          if [ -z "${LINE}" ]; then
+            echo "::error::no bootc status JSON found in console.log"
+            exit 1
+          fi
+          echo "${LINE}" | jq -e '.status.booted != null and .status.staged == null and .status.rollback == null'
+
+      - name: Assert zero SELinux avc denials
+        # The coordinating session's explicit "belt and suspenders" bar
+        # for the SELinux port-3000 fix (docs/DECISIONS.md Deviation
+        # D-A18): a passing health check AND the absence of new avc
+        # denials, not either alone.
+        run: |
+          COUNT="$(sudo grep -c 'avc:  denied' /tmp/console.log || true)"
+          echo "avc denial count: ${COUNT:-0}"
+          [ "${COUNT:-0}" -eq 0 ]
+
       - name: Upload console log as a CI artifact
         if: always()
         uses: actions/upload-artifact@v4

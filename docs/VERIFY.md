@@ -288,6 +288,11 @@ read/write check), run for real rather than trusted from the spec's own
 assertion. Result to be recorded here from the first real `boot-test.yml`
 run once dispatched — not filled in speculatively.
 
+**RESOLVED 2026-08-31**: confirmed true on every single `boot-test.yml`
+dispatch across this entire M0 pass (dozens of runs) — `/dev/kvm` is
+present and read/write accessible, and every run genuinely boots under
+real KVM acceleration. SPEC.md §16.2's assertion holds.
+
 ## 2026-08-30 — ESP mount path assumption in `image/firstboot/wizard.py`
 
 `wizard.py` assumes the ESP is mounted at `/boot/efi` at runtime (standard
@@ -297,6 +302,10 @@ exact bootc/ostree layout from this sandbox. The boot-test probe unit
 SOURCE,TARGET,FSTYPE,OPTIONS /boot/efi` specifically so the real answer
 shows up in the console log the first time this actually boots, rather
 than being assumed silently.
+
+**RESOLVED 2026-08-31**: confirmed correct. Real `findmnt` output, every
+successful boot: `/dev/vda2 /boot/efi vfat rw,relatime,...` — `/boot/efi`
+is exactly right on this image's real layout.
 
 ## 2026-08-30 — real root-partition-vs-`/` distinction on this ostree/bootc layout
 
@@ -308,6 +317,11 @@ against this exact image's boot layout from this sandbox; the function
 tries `/sysroot` first and falls back to `/` if that lookup fails, and its
 own `_log()` calls record which path resolved in the console log the boot
 test captures.
+
+**RESOLVED 2026-08-31**: confirmed correct. Real log, every successful
+boot: `root device resolved via /sysroot (/dev/vda4) -> parent disk
+/dev/vda` — `/sysroot` is exactly right, `/` was never needed as a
+fallback.
 
 ## 2026-08-30 — `bootc status --json` schema: not yet observed for real
 
@@ -321,6 +335,24 @@ currently just displays it (search the console log / uploaded
 `boot-test-console-log` artifact for `FRIDAY-BOOT-TEST-PROBE-BEGIN`). A
 follow-up commit should encode a precise `jq`-based assertion once the
 real shape has actually been seen in a CI run, not before.
+
+**RESOLVED 2026-08-31**: the real shape, observed repeatedly across CI run
+33438580570 and others:
+```json
+{"apiVersion":"org.containers.bootc/v1","kind":"BootcHost",
+ "metadata":{"name":"host"},
+ "spec":{"bootOrder":"default","image":{"image":"...","transport":"registry"}},
+ "status":{
+   "booted":{"image":{"image":{...},"imageDigest":"sha256:...","version":"..."},
+             "ostree":{"checksum":"...","deploySerial":0,"stateroot":"default"},
+             ...},
+   "readOnly":false,"rollback":null,"rollbackQueued":false,"staged":null,
+   "type":"bootcHost","usrOverlay":null}}
+```
+A future precise assertion for "exactly one deployment" should check
+`.status.staged == null and .status.rollback == null and .status.booted
+!= null` via `jq` — `booted` present, `staged`/`rollback` both `null`, is
+exactly the one-deployment case this M0 acceptance line asks for.
 
 ## 2026-08-30 — `build/disk.toml`: applied despite a confusing "not supported" log line
 
