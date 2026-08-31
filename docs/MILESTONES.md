@@ -814,6 +814,41 @@ a counter every 5 seconds for as long as it runs - to determine whether
 this is a total console/kernel freeze (heartbeats also stop) or
 something narrower to specific units. Not yet re-verified.
 
+**2026-08-31 — REAL ROOT CAUSE FOUND (without a new boot cycle — re-read
+run 33413256821's own console log for the raw kernel audit lines, which
+bypass journald's userspace formatting and were never actually silent):
+the "console goes silent" mystery was a red herring. `friday.service`
+starts successfully; SELinux blocks it from using port 3000.** Grepping
+that same log for `avc:` (not just `[ OK ]`/`[FAILED]` status lines, which
+*were* genuinely missing because journald's own userspace reporting broke
+after the `@journal` remount — see Deviation D-A19) shows, repeating from
+~78s onward:
+```
+avc: denied { name_connect } for pid=1630 comm="friday" dest=3000
+scontext=system_u:system_r:init_t:s0
+tcontext=system_u:object_r:ntop_port_t:s0 tclass=tcp_socket permissive=0
+```
+SELinux, correctly enforcing (`permissive=0`, never disabled), blocks the
+`friday` process from using port 3000 because that port carries
+`ntop_port_t` in the base policy — some other tool's own reservation —
+not the generic `unreserved_port_t` an arbitrary port would default to.
+The Python app itself was never hanging or crashing; it just could never
+open the port SPEC.md §8.1 names (`FRIDAY_PORT=3000`). **Fixed** (see
+`docs/DECISIONS.md` Deviation D-A18): added `policycoreutils-python-utils`
+(provides `semanage`, not previously installed) and relabeled port 3000
+as `http_port_t` (the standard type for a real HTTP server port) via
+`semanage port -a -t http_port_t -p tcp 3000` (falling back to `-m` since
+the port already carries an explicit type). The build itself now prints
+`semanage port -l | grep -w 3000` so the relabel is visible in the build
+log directly. Also recorded, lower priority, not fixed this pass: the
+journald "Failed to open user journal file" spam after the live
+`@journal` remount (Deviation D-A19) — doesn't block M0 but deserves a
+real fix eventually. **Not yet re-verified against a real boot** — the
+next dispatch needs to show both a responding `/api/health` AND the
+absence of any new `avc: denied` lines for port 3000, per the coordinating
+session's explicit instruction that either alone is weaker proof than
+both together.
+
 ## M1-M4
 
 Not started. Per rule 4, they don't start until M0's checklist above is

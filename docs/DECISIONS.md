@@ -666,6 +666,62 @@ silently made, for each place the spec's text couldn't be used verbatim.
   its text said was needed: "a real systemd install to check ... against,
   which this sandbox cannot do" — now it can, via the boot test itself.
 
+- **Deviation D-A18: relabeled SELinux port 3000 as `http_port_t` —
+  the actual, confirmed blocker for `/api/health` across every boot test
+  in this pass.** CI run 33413256821's console log looked like the whole
+  system had gone silent partway through every boot (docs/MILESTONES.md
+  has several dated entries chasing this as a possible hang or a
+  console-visibility bug). It was neither: `systemd-journald`'s own
+  userspace status-line reporting stopped working after the `@journal`
+  remount (see the next entry below), which is what made grepping for
+  `[ OK ]`/`[FAILED]` lines look like total silence — but the kernel's own
+  audit/printk output, which bypasses journald's userspace formatting
+  entirely, kept flowing the whole time and had the real answer:
+  `avc: denied { name_connect } for pid=1630 comm="friday" dest=3000
+  scontext=system_u:system_r:init_t:s0
+  tcontext=system_u:object_r:ntop_port_t:s0 tclass=tcp_socket
+  permissive=0`, repeating from ~78s onward. `friday.service` starts
+  successfully; SELinux (correctly enforcing, `permissive=0` — never
+  disabled, per §0 rule 7 / §10.2) blocks the app from actually using port
+  3000, because port 3000 carries `ntop_port_t` in the base policy
+  (reserved by an unrelated tool's own policy module) rather than the
+  generic `unreserved_port_t` an arbitrary free port would default to.
+  Fixed in the Containerfile: `semanage port -a -t http_port_t -p tcp
+  3000` (falling back to `-m` since `-a` fails on a port that already has
+  an explicit type), plus `policycoreutils-python-utils` added to the
+  package list (provides `semanage` — not already present; `restorecon`,
+  used elsewhere in this repo, comes from the separate `policycoreutils`
+  base package which was already available). `http_port_t` is the
+  standard, broadly-permitted SELinux type for a real HTTP server port,
+  which is exactly what this is. `friday.service` running under the
+  generic `init_t` domain (no dedicated SELinux type was ever created for
+  it) is a separate, real gap worth reconsidering later — the port-label
+  fix alone is expected to be sufficient for M0, and is verified by the
+  absence of new `avc: denied` lines in the next boot's log, not merely
+  by `/api/health` responding (either alone is weaker evidence than both
+  together).
+
+- **Deviation D-A19 (lower priority, not fixed this pass, recorded so it
+  does not cost someone else time later): `systemd-journald` repeats
+  "Failed to open user journal file, falling back to system journal: No
+  such file or directory" after the `@journal` subvolume is mounted live
+  over `/var/log/journal` (`docs/MILESTONES.md`'s 2026-08-31 entries cover
+  the fix: `systemctl kill --signal=SIGUSR1 systemd-journald.service` in
+  `image/firstboot/wizard.py`, chosen over a full restart specifically
+  because the restart broke console-log forwarding for the rest of
+  boot).** This does not block M0 — the *system* journal
+  (`journalctl` without `--user`) keeps working, which is all the boot
+  probes in this repo rely on — but it means journald's own per-user
+  journal file handling is not fully healthy after the live remount, and
+  it pollutes every future log capture with repeated noise. Root cause
+  not investigated (the live `@journal` mount is inherently an unusual
+  sequence — a filesystem swapped out from under an already-running
+  journald instance, signaled rather than restarted specifically to avoid
+  the console-forwarding disruption a full restart caused — so some
+  rough edges surviving that are not the *system* journal are plausible). Flagged for whoever next
+  touches the first-boot wizard's `@journal` handling, rather than left
+  to be silently rediscovered.
+
 - **Executable bits are set in the Containerfile, not relied on from git.**
   Confirmed via `git ls-files -s` after committing: every file this repo
   tracks landed as mode `100644`, including the `.sh` scripts and the

@@ -83,6 +83,7 @@ RUN dnf install -y \
         greenboot \
         cryptsetup btrfs-progs gdisk \
         python3-pyyaml \
+        policycoreutils-python-utils \
         google-noto-sans-fonts google-noto-emoji-color-fonts google-noto-sans-cjk-fonts \
     && dnf clean all
 
@@ -160,6 +161,37 @@ RUN mkdir -p /var/home && \
 # exist, and nothing creates arbitrary new top-level directories on a
 # read-only root at runtime.
 RUN mkdir -p /friday/lockbox
+
+# ── SELinux port label for friday.service's port (SPEC.md §8.1 FRIDAY_PORT) ──
+# REAL BOOT FAILURE, CI run 33413256821 (found by reading the raw kernel
+# audit lines in the captured console log directly — journald's own
+# userspace status-line reporting had stopped working after the @journal
+# remount, which is what made it look like the whole console had gone
+# silent; the kernel's own audit/printk output kept flowing the entire
+# time and had the real answer): friday.service starts successfully
+# ("[ OK ] Started friday.service"), but the app can never actually serve
+# on its port:
+#   avc: denied { name_connect } for pid=1630 comm="friday" dest=3000
+#   scontext=system_u:system_r:init_t:s0
+#   tcontext=system_u:object_r:ntop_port_t:s0 tclass=tcp_socket
+#   permissive=0
+# SELinux is correctly enforcing (permissive=0 — not disabled, per §0
+# rule 7 / §10.2, "SELinux enforcing, never permissive"). Port 3000 is
+# pre-labeled `ntop_port_t` in the base policy (reserved by an unrelated
+# tool's own policy module, "ntop"), not the generic `unreserved_port_t`
+# an arbitrary high port would default to — colliding with Agent-Friday's
+# own use of 3000 (SPEC.md §8.1 FRIDAY_PORT=3000). friday.service runs
+# under the generic `init_t` domain (no dedicated SELinux type was ever
+# created for it — a real gap worth reconsidering later, but the port
+# label collision is the actual, sufficient blocker here). Fixed by
+# relabeling port 3000 as `http_port_t`, the standard, broadly-permitted
+# type for a real HTTP server port (which is exactly what this is — a
+# Flask server) — `-a` (add) if the port has no override yet, falling
+# back to `-m` (modify) since `ntop_port_t`'s existing explicit
+# assignment means `-a` alone fails ("port already defined").
+RUN semanage port -a -t http_port_t -p tcp 3000 \
+      || semanage port -m -t http_port_t -p tcp 3000 \
+    && semanage port -l | grep -w 3000
 
 # ── Build-time-only tooling for the venv-install step below ──────────────
 # `git` (to clone Agent-Friday at the pin) and `uv` (to create the venv) are
