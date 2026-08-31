@@ -88,19 +88,58 @@ never guessed, per SPEC.md §18 rule 5.
   `agent-friday.pin` moves to a post-PR-3 tag.
 
 **Real, lower-priority items recorded for whoever picks up M1, not
+blocking this milestone.** Per the orchestrator's explicit instruction:
+each one below states what it would take to actually close it, not just
+that it exists — a deferred item that only lives in a chat transcript is a
+forgotten item.
+
+1. **Storage partition sizing is only partially exact.** D-A10 (above)
+   resolves `/` (16 GiB) and `/boot` (1 GiB) to match SPEC.md §5's fixed
+   sizes exactly — that part is genuinely done, not deferred.
+   **What's still open:** the ESP (§5 wants 512 MiB) has no
+   `bootc-image-builder` customization primitive at all — confirmed by
+   reading its real, current schema (D-A10), not assumed — so it ships at
+   whatever size the tool's own default produces, unverified against the
+   512 MiB figure. **To close:** measure the actual ESP partition size in
+   a built image (`sgdisk -p` on the raw output, partition 2) and either
+   confirm it already matches 512 MiB by coincidence, or find whether a
+   newer `bootc-image-builder` release has gained an ESP-size primitive
+   before concluding none exists — the tool is under active development
+   and this may no longer be true by M1.
+
+2. **`friday.service` runs in the generic `init_t` SELinux domain**
+   instead of a dedicated or `unconfined_service_t` domain. The custom
+   policy module (this milestone's real fix) grants exactly one narrow
+   permission (`init_t` → `http_port_t` `name_connect`) and nothing
+   broader, so this is not a security hole today — but every *future*
+   permission this app needs (a new port, a new device, a new capability)
+   will require another hand-written module addition under this same
+   pattern, which doesn't scale past a small, fixed set. **To close:**
+   give `friday.service` its own SELinux domain transition (either
+   `unconfined_service_t` via `SELinuxContext=` in the unit file, or a
+   purpose-built domain with a real `.te` policy covering everything the
+   app legitimately needs), verified by confirming zero new `avc: denied`
+   lines across a full functional test of the app, not just the boot-health
+   endpoint this milestone exercised.
+
+3. **The first-boot wizard only accepts a literal passphrase** in
+   `friday-unattended.yaml`'s `lockbox.passphrase` field — SPEC.md §7.3
+   step 4 / Q1's "generate a random passphrase and print/display it once"
+   option is not implemented (`image/firstboot/wizard.py`'s
+   `create_lockbox()` caller logs exactly this gap when the field is
+   absent, rather than silently failing). This is explicitly M1 scope (the
+   real interactive wizard), not an M0 regression. **To close:** implement
+   the generate-and-display path per §7.3 step 4's actual wording,
+   including the "show a recovery key once, opt-in" sub-decision SPEC.md
+   §17 Q1 defaults to yes on — both need real UI, not just wizard.py
+   backend logic, since M0's stub has no interactive surface at all yet.
+
+**Other real, lower-priority items recorded for whoever picks up M1, not
 blocking this milestone:**
 - Deviation D-A19: `systemd-journald` repeats "Failed to open user
   journal file" after the live `@journal` remount. Does not affect the
   *system* journal (everything in this milestone's evidence relies on
   that, and it works), but pollutes logs and deserves a real fix.
-- `friday.service`'s process runs in the generic `init_t` SELinux domain
-  rather than transitioning to a dedicated or `unconfined_service_t`
-  domain — the port relabel + custom policy module route worked, but
-  giving the app its own SELinux domain is a more correct long-term fix
-  worth reconsidering.
-- The first-boot wizard's lockbox-creation code only supports a literal
-  passphrase in `friday-unattended.yaml`, not SPEC.md §7.3 step 4 / Q1's
-  "generate and print" option — M1 scope (the full wizard).
 - `friday-kiosk.service` remains installed but disabled (M1 scope, per
   SPEC.md §15's own milestone split).
 
