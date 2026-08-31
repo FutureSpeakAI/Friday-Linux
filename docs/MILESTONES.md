@@ -447,6 +447,35 @@ sees the disk as genuinely smaller than the host does (a QEMU/virtio
 sizing issue) or sees the right size but computes free space differently
 (a GPT header/`sgdisk -e` issue).
 
+**2026-08-31 — CI run 33350200049: real, significant architectural
+finding — something grows the ROOT PARTITION TABLE ENTRY itself to fill
+the whole disk during boot, before the wizard ever runs.** The
+diagnostic's real output settles the disagreement cleanly:
+`blockdev --getsize64 /dev/vda` = 23077060608 bytes (~21.49 GiB) —
+matches the host's expected size exactly, so this is NOT a QEMU/virtio
+sizing bug. But the guest's own `sgdisk -p /dev/vda` shows **partition 4
+(root) as 3127296-45072350, 20.0 GiB, "Total free space is 0 sectors"** —
+whereas the HOST's `sgdisk -p` on the identical file, moments before
+boot, showed partition 4 as 3127296-36683742, **16.0 GiB**, with 4.0 GiB
+free after it. Something between "file written to disk" and "wizard.py
+runs" has grown partition 4's own GPT table entry to consume every
+remaining sector — not merely grown a filesystem inside a fixed
+partition (`systemd`'s GPT GROWFS attribute, bit 59 per the real
+Discoverable Partitions Specification, does the latter, not the former,
+so it's ruled out as the mechanism, not assumed). `systemd-repart` (which
+can genuinely grow a partition into following free space at boot — a
+well-known "ship a small image, let it fill whatever disk it lands on"
+pattern used by several bootc/ostree-based distros) is the live
+hypothesis. Added a real diagnostic (filtered `journalctl -b` for
+repart/growfs/resize/GPT lines, `find /usr/lib/repart.d /etc/repart.d`,
+`systemctl status systemd-repart.service`) rather than writing a fix
+against an unconfirmed mechanism. **This is the actual, real blocker for
+"lockbox holds five subvolumes on the boot device's remaining free
+space" (SPEC.md §5/ADR-004) if confirmed** — whatever is growing root
+needs to be told to stop (or constrained to the disk.toml-specified 16
+GiB) before the wizard's free-space-claiming logic can ever succeed on
+real, larger media, not just in this CI test.
+
 ## M1-M4
 
 Not started. Per rule 4, they don't start until M0's checklist above is
