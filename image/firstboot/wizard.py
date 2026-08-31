@@ -150,6 +150,16 @@ def create_lockbox_partition(disk: str) -> str:
     partition by UUID, not by type-GUID auto-discovery, so a wrong type
     code does not break functionality, only `gdisk -l`'s own labelling.
     """
+    # DIAGNOSTIC (CI run 33346716623): sgdisk -n 0:0:0 failed with
+    # "Could not create partition 5 from 0 to 2047" — meaning sgdisk
+    # believed the LARGEST free block was sectors 0-2047 (1 MiB), not the
+    # multi-GiB block after the last real partition that the host-side
+    # "Grow the disk" CI step's own sgdisk -p confirmed exists on this
+    # same file before boot. Logging the guest's own view of the disk
+    # before attempting -n, rather than guessing further, since the two
+    # views disagree and only one of them is visible so far.
+    _run(["blockdev", "--getsize64", disk], check=False)
+    _run(["sgdisk", "-p", disk], check=False)
     before = set(_run(["lsblk", "-no", "NAME", disk]).stdout.decode().split())
     _run(["sgdisk", "-n", "0:0:0", "-t", "0:8309", "-c", "0:friday-lockbox", disk])
     _run(["udevadm", "settle"])

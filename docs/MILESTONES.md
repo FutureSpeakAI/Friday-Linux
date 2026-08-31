@@ -430,6 +430,23 @@ file before boot (`Total free space is 8386594 sectors (4.0 GiB)`), so
 "no free space" is not the obvious suspect — the real cause is still
 open pending the next run's actual error text.
 
+**2026-08-31 — CI run 33346716623: the diagnostic fix worked, and it
+surfaced the real `sgdisk` error for the first time.** `wizard.py`'s
+journal now shows the actual failure: `sgdisk -n 0:0:0 ... stderr: Could
+not create partition 5 from 0 to 2047`. Per sgdisk's own documented
+semantics (start=0 means "start of the LARGEST available free block"),
+this means the GUEST's `sgdisk` believes the largest free block on
+`/dev/vda` is a mere 2048 sectors (1 MiB, the gap between the GPT
+header/array and partition 1) — not the ~4 GiB block after partition 4
+that the HOST's own `sgdisk -p` confirmed exists on this exact file
+right before boot. Root cause not yet determined: added a diagnostic
+(`blockdev --getsize64` + `sgdisk -p` from inside the guest, logged
+before the `-n` attempt) rather than guess a fix for a disagreement that
+isn't understood yet — next run's journal will show whether the guest
+sees the disk as genuinely smaller than the host does (a QEMU/virtio
+sizing issue) or sees the right size but computes free space differently
+(a GPT header/`sgdisk -e` issue).
+
 ## M1-M4
 
 Not started. Per rule 4, they don't start until M0's checklist above is
