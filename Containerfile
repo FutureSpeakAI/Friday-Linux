@@ -84,8 +84,13 @@ RUN dnf install -y \
         cryptsetup btrfs-progs gdisk \
         python3-pyyaml \
         policycoreutils-python-utils \
+        jq \
         google-noto-sans-fonts google-noto-emoji-color-fonts google-noto-sans-cjk-fonts \
     && dnf clean all
+# jq (B5, 2026-08-31): needed by the restored greenboot 30-health.sh, which
+# parses boot_critical_ok out of the real JSON body now that PR-6 has landed
+# — see that script's own header for the full history of why it was
+# checking the HTTP status code alone until now.
 
 # avahi and cups are P1 (§6, §8.7) — not installed in v1.
 
@@ -261,14 +266,16 @@ COPY --from=llama-build /out/llama-gguf-split    /usr/libexec/friday/llama-gguf-
 # COPY image/voice/ /usr/share/friday/voice/
 
 # ── Application venv (§6 "Application") ──────────────────────────────────
-# Per Amendment A1 (docs/SPEC.md, Deviation D-A1 in docs/DECISIONS.md):
-# PR-3's packaging work (installable from a git tag with no separate seed
-# copy step) has not landed upstream, so `pip install ... @ git+...@<tag>`
-# alone would not carry data/ or skills/ into the venv. Until PR-3 lands,
-# this repo does that copy itself as a deployment step, not a vendored
-# patch — clone the pinned tag in full, install it editable, then copy
-# data/ and skills/ out to the seed location friday-firstboot reads from.
-# Removed the moment PR-3 merges and build/agent-friday.pin moves past it.
+# B5 (docs/SPEC.md dispatch, 2026-08-31): Amendment A1's seed-copy workaround
+# is REMOVED here. PR-3 (merged upstream in Agent-Friday v5.9.0) moved
+# data/ and skills/ into the installable package proper as
+# agent_friday.seed.*, with the app's own ensure_seed_skills_installed()
+# (called from cli.cmd_start()/setup_wizard.main()) copying them into
+# friday_home()/skills on first run — no separate /usr/share/friday/seed/
+# staging directory needed; confirmed nothing else in this repo ever read
+# from that path (grepped before removing it, not assumed). A plain
+# `pip install ... @ git+...@<tag>` now carries the seed data automatically,
+# which is the whole point PR-3 shipped.
 COPY build/agent-friday.pin /tmp/agent-friday.pin
 # HOME=/tmp and an explicit UV_CACHE_DIR sidestep a bootc-image quirk: /root
 # in a Fedora bootc container is a symlink into /var/roothome, and /var is
@@ -280,17 +287,12 @@ COPY build/agent-friday.pin /tmp/agent-friday.pin
 # directory in the build container) avoids the whole class of problem rather
 # than trying to pre-create /var/roothome.
 RUN AGENT_FRIDAY_TAG="$(grep -v '^#' /tmp/agent-friday.pin | head -1)" && \
-    git clone --branch "${AGENT_FRIDAY_TAG}" --depth 1 \
-        https://github.com/FutureSpeakAI/Agent-Friday.git /usr/lib/friday/src && \
     HOME=/tmp UV_CACHE_DIR=/tmp/uv-cache uv venv /usr/lib/friday/venv && \
     HOME=/tmp UV_CACHE_DIR=/tmp/uv-cache uv pip install --python /usr/lib/friday/venv/bin/python \
-        -e "/usr/lib/friday/src[voice-local-lite,federation,google,compose,provenance]" && \
+        "agent-friday[voice-local-lite,federation,google,compose,provenance] @ git+https://github.com/FutureSpeakAI/Agent-Friday.git@${AGENT_FRIDAY_TAG}" && \
     HOME=/tmp UV_CACHE_DIR=/tmp/uv-cache uv pip install --python /usr/lib/friday/venv/bin/python \
         "headroom-ai>=0.22" && \
-    mkdir -p /usr/share/friday/seed && \
-    cp -r /usr/lib/friday/src/data   /usr/share/friday/seed/data && \
-    cp -r /usr/lib/friday/src/skills /usr/share/friday/seed/skills && \
-    rm -rf /tmp/uv-cache /usr/lib/friday/src/.git
+    rm -rf /tmp/uv-cache
 # The `rm -rf /tmp/uv-cache` above matters for more than tidiness: CI run
 # 33321625110 ran the GitHub runner out of disk space a third time, this
 # time on THIS layer, because UV_CACHE_DIR=/tmp/uv-cache writes every
@@ -300,11 +302,20 @@ RUN AGENT_FRIDAY_TAG="$(grep -v '^#' /tmp/agent-friday.pin | head -1)" && \
 # for no runtime benefit (the cache is never read again after this RUN
 # exits). Removing it in the same RUN/layer (so it never appears in the
 # layer's diff at all, rather than a later RUN which would still leave it
-# in an earlier layer) fixes that. `.git` in the shallow clone is a much
-# smaller second cleanup in the same spirit.
+# in an earlier layer) fixes that.
 #
 # Explicitly excluded per §6 and §18 rule 7 (prohibited shortcuts): the
 # [windows] extra, and therefore pyautogui, pynput, and pystray.
+#
+# UNVERIFIED, flagged not guessed: this is the first time this repo installs
+# directly from a git tag reference rather than a local editable clone. If
+# `pip`/`uv`'s git+https VCS install of agent-friday at this tag does not
+# correctly resolve to a wheel/sdist that includes agent_friday/seed/ (PR-3's
+# packaging relies on setuptools package-data declarations that a VCS
+# install exercises differently than the editable-from-clone path this
+# repo used before), that will surface as a real CI failure at this step or
+# as a missing seed at first boot — read the real error before assuming
+# which, per this project's own standing rule.
 #
 # Deviation D-A3 (see docs/DECISIONS.md): §6's given extras list is
 # "[voice-local-lite,local,compression,federation,google,compose,provenance]"
