@@ -227,8 +227,21 @@ def create_lockbox(partition: str, passphrase: str) -> None:
 
     write_subvolume_mount_units()
     _run(["systemctl", "daemon-reload"])
-    unit_names = [unit_name_for(mp) for _, mp, _ in SUBVOLUME_MOUNTS]
-    _run(["systemctl", "enable", "--now", *unit_names])
+    # One at a time with check=False (real bug, CI run 33365778055):
+    # `systemctl enable --now unit1 unit2 unit3 unit4` in one call means
+    # one bad unit fails the whole call, which used to raise (check=True
+    # default) and crash the wizard before it could write secrets.env /
+    # the .firstboot-done marker / start friday.service at all. Per-unit
+    # + check=False means one mount's own failure doesn't take out the
+    # other three or abort the rest of first boot; a diagnostic dump of
+    # the failing unit's own journal follows immediately so the real
+    # error is visible without a second guess.
+    for _, mountpoint, _ in SUBVOLUME_MOUNTS:
+        unit = unit_name_for(mountpoint)
+        result = _run(["systemctl", "enable", "--now", unit], check=False)
+        if result.returncode != 0:
+            _log(f"{unit} failed to start — dumping its journal:")
+            _run(["journalctl", "-u", unit, "--no-pager", "-n", "50"], check=False)
 
     friday_uid = pwd.getpwnam("friday").pw_uid
     friday_gid = pwd.getpwnam("friday").pw_gid

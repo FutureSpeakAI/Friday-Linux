@@ -559,6 +559,66 @@ followed by `cryptsetup ... /dev/├─vda4` failing with "Device
 output with no tree formatting. Not yet re-verified — next dispatch is
 the check.
 
+**2026-08-31 — CI run 33365778055: MASSIVE real progress — `bootc status`,
+`/usr` read-only, and the five-subvolume lockbox are all independently
+confirmed for real, with one remaining bug found.** The `Type=oneshot`
+fix worked (probe now waits for the actual wizard completion, running at
+~74s instead of ~56s), and the probe's own captured output gives direct,
+real evidence for two of M0's three remaining checklist lines:
+
+- **`bootc status` shows one deployment** — CONFIRMED. Real
+  `bootc status --json` output: `"booted":{...,"image":{"imageDigest":
+  "sha256:c691a132677d21b17564e1cbfbb854dd55bec5cf2e866624070b63a7c9154
+  1ee","version":"44.20260830.0"},...},"staged":null,"rollback":null`.
+  Exactly one deployment (booted), nothing staged, nothing to roll back
+  to.
+- **`/usr` is read-only** — CONFIRMED, a second independent time:
+  `USR_WRITABLE=no (touch: cannot touch
+  '/usr/.friday-boot-test-writeprobe': Read-only file system)`.
+- **Lockbox is LUKS2/Argon2id with five subvolumes** — CONFIRMED. Real
+  `btrfs subvolume list /friday/lockbox` output lists all five: `@home`,
+  `@models`, `@workshop`, `@journal`, `@snapshots`. Real `lsblk` output
+  shows the full chain for real: `vda5` (4G, `crypto_LUKS`) →
+  `friday-lockbox` (crypt, btrfs, 4G, mounted at `/friday/lockbox`) — a
+  genuinely LUKS2-encrypted (Argon2id, per the `cryptsetup luksFormat`
+  invocation) partition, opened, formatted, and mounted, holding all five
+  subvolumes SPEC.md §5 names.
+- Bonus real confirmation: `findmnt /boot/efi` → `/dev/vda2 /boot/efi
+  vfat rw,relatime,...` — the ESP mount path `wizard.py` assumed
+  (`/boot/efi`) is correct on this real layout, no longer just an
+  assumption (docs/VERIFY.md's entry on this is resolved).
+
+**One remaining real bug**: `systemctl list-units --failed` shows
+`home-friday.mount loaded failed failed Friday lockbox subvolume @home ->
+/home/friday` — the `@home` subvolume mount (only) failed, while
+`@models`/`@workshop`/`@journal` are not shown as failed (implying they
+mounted fine, though not independently confirmed active in this same
+capture). Root cause not yet determined — the console log doesn't carry
+enough detail (`systemctl list-units` doesn't show the failure reason).
+Fixed the code around it either way: `create_lockbox()`'s
+`systemctl enable --now <4 units in one call>` used `check=True`
+(the default), meaning one failing unit would raise and abort the rest of
+first boot (secrets.env, the `.firstboot-done` marker, starting
+`friday.service`) before they ever ran — changed to one `systemctl
+enable --now <unit>` call per subvolume with `check=False`, plus an
+immediate `journalctl -u <unit>` dump on failure, so (a) one mount's
+failure can no longer block the other three or the rest of first boot,
+and (b) the next run's log will carry the real error text for `@home`
+specifically instead of just its failed status. Not yet re-verified.
+
+**`/api/health` still did not respond within 300s on this run** — with
+`@home` failed but `.firstboot-done` apparently still written (since the
+other evidence shows first boot completed enough to run the probe, which
+requires `.provisioned-unattended`, set early, so this doesn't by itself
+prove `.firstboot-done` was reached) and `friday.service`'s own explicit
+restart call added last round, whether `friday.service` is actually
+running (and, if not, why) still needs to be checked directly in the next
+run — `journalctl -u friday-firstboot`/`-u friday.service` reported "--
+No entries --" in this run's probe capture despite clear evidence the
+wizard executed, an unexplained oddity noted here rather than chased
+further right now since it isn't blocking — the next run's fuller,
+per-unit diagnostics should clarify incidentally.
+
 ## M1-M4
 
 Not started. Per rule 4, they don't start until M0's checklist above is
