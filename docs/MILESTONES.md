@@ -790,6 +790,30 @@ visibility into `friday.service`'s eventual fate instead of only ever
 seeing a too-early snapshot. `boot-test.yml` updated to display this
 block too. Not yet re-verified.
 
+**2026-08-31 - CI run 33413256821: the late probe never fired, and
+console output stops appearing entirely right after the early probe ends
+(~78s) - a real, recurring pattern independent of any specific fix.**
+`wizard.py` itself completed with zero errors this run (its very last
+line, "deleted ... per SPEC.md section 7.6", confirms clean completion),
+and the early probe printed its full, successful output ending in
+`FRIDAY-BOOT-TEST-PROBE-END` - but absolutely nothing appears in the
+captured console log after that line, for the remaining ~220s of the
+test window, including the late probe (which should have fired at 200s).
+This exact symptom - total console silence starting at a point that
+varies run to run (78s here; 85s, 126s, 134s in earlier runs) with no
+panic or visible crash - has now recurred independent of whatever the
+proximate trigger seemed to be each time (journald restart, a hung
+subprocess, or nothing at all, as in this clean run). Three of M0's four
+remaining checklist items (`bootc status` one deployment, `/usr`
+read-only, five-subvolume lockbox) have now been independently confirmed
+correct in every run that got this far - only whether `friday.service`
+itself ever comes up remains genuinely unknown, because this console
+visibility issue is hiding the answer. Added
+`friday-boot-test-heartbeat.service` - a diagnostic-only unit that prints
+a counter every 5 seconds for as long as it runs - to determine whether
+this is a total console/kernel freeze (heartbeats also stop) or
+something narrower to specific units. Not yet re-verified.
+
 ## M1-M4
 
 Not started. Per rule 4, they don't start until M0's checklist above is

@@ -298,6 +298,7 @@ COPY image/systemd/friday-boot-test-probe.service  /usr/lib/systemd/system/frida
 COPY image/systemd/friday-boot-test-probe-late.service /usr/lib/systemd/system/friday-boot-test-probe-late.service
 COPY image/systemd/friday-boot-test-probe-late.timer   /usr/lib/systemd/system/friday-boot-test-probe-late.timer
 COPY image/systemd/friday-boot-test-relay.service  /usr/lib/systemd/system/friday-boot-test-relay.service
+COPY image/systemd/friday-boot-test-heartbeat.service /usr/lib/systemd/system/friday-boot-test-heartbeat.service
 COPY image/etc/friday/os.env                   /etc/friday/os.env
 COPY image/greenboot/required.d/               /etc/greenboot/check/required.d/
 COPY image/chromium/policies/managed/friday.json /etc/chromium/policies/managed/friday.json
@@ -345,7 +346,8 @@ COPY helper/friday-os-helper/                  /usr/libexec/friday/
 RUN systemctl enable friday-lockbox.mount friday.service friday-caddy.service \
         friday-firstboot.service friday-boot-test-probe.service \
         friday-boot-test-probe-late.timer \
-        friday-boot-test-relay.service nftables.service \
+        friday-boot-test-relay.service friday-boot-test-heartbeat.service \
+        nftables.service \
     && chmod 440 /etc/sudoers.d/friday-os-helper \
     && chmod 0755 /usr/libexec/friday/friday-os-helper \
     && chmod 0755 /usr/libexec/friday/boot-test-relay.py \

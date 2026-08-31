@@ -1,0 +1,27 @@
+# Friday Linux — NOT in SPEC.md; a diagnostic-only unit added to isolate a
+# real, recurring anomaly: across every CI boot test so far (see
+# docs/MILESTONES.md, several dated 2026-08-31 entries), ALL console
+# output — not just this repo's own units, but plain kernel/systemd
+# status lines too — stops appearing in the captured serial console
+# partway through boot (the exact point varies: 78s, 85s, 126s, 134s
+# across different runs), with no panic, no visible crash, nothing. This
+# unit prints one line every 5 seconds for as long as it runs, so a boot
+# test can tell "the whole console stopped producing output at time T"
+# (heartbeats stop too) apart from "only this or that specific unit
+# stopped" (heartbeats keep going). Gated the same way as every other
+# CI-only unit in this image: inert unless
+# /var/lib/friday/.provisioned-unattended exists.
+[Unit]
+Description=Friday Linux CI-only console heartbeat (diagnostic only, see header)
+ConditionPathExists=/var/lib/friday/.provisioned-unattended
+
+[Service]
+Type=simple
+StandardOutput=journal+console
+StandardError=journal+console
+ExecStart=/bin/sh -c 'i=0; while true; do i=$((i+1)); echo "FRIDAY-HEARTBEAT $i $(date +%s)"; sleep 5; done'
+Restart=always
+RestartSec=1
+
+[Install]
+WantedBy=multi-user.target

@@ -224,6 +224,10 @@ jobs:
           sudo sed -n '/FRIDAY-BOOT-TEST-PROBE-BEGIN/,/FRIDAY-BOOT-TEST-PROBE-END/p' /tmp/console.log || true
           echo "--- FRIDAY-LATE-PROBE block only (friday.service status ~200s in) ---"
           sudo sed -n '/FRIDAY-LATE-PROBE-BEGIN/,/FRIDAY-LATE-PROBE-END/p' /tmp/console.log || true
+          echo "--- FRIDAY-HEARTBEAT lines (diagnostic: is the console alive the whole time?) ---"
+          sudo grep 'FRIDAY-HEARTBEAT' /tmp/console.log || echo "no heartbeat lines at all"
+          echo "--- last heartbeat count ---"
+          sudo grep 'FRIDAY-HEARTBEAT' /tmp/console.log | tail -1 || true
 
       - name: Assert /usr is read-only, from the probe output
         run: |
