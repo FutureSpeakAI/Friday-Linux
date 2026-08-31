@@ -389,6 +389,19 @@ def main() -> int:
     FIRSTBOOT_DONE.write_text("done\n", encoding="utf-8")
     _log(f"wrote {FIRSTBOOT_DONE} — friday.service may now start")
 
+    # Real bug, found via CI run 33357468619's console log: friday.service
+    # is WantedBy=multi-user.target, so systemd attempts to start it early
+    # in boot as part of reaching that target — long before this wizard
+    # has created the lockbox. That attempt fails
+    # ("Dependency failed for friday.service", since
+    # Requires=friday-lockbox.mount can't be satisfied yet) and systemd
+    # does NOT automatically retry a unit whose job already failed once
+    # its dependency later becomes available — ConditionPathExists is
+    # evaluated once per start attempt, not watched continuously. Without
+    # an explicit re-trigger here, friday.service would simply never start
+    # on this boot even after everything it needs now exists.
+    _run(["systemctl", "start", "friday.service"], check=False)
+
     # SPEC.md §7.6: "The file is deleted from the ESP after use."
     try:
         UNATTENDED_FILE.unlink()

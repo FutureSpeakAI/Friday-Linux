@@ -1,12 +1,25 @@
 # Friday Linux — SPEC.md §7.3. Runs once, before friday.service, per the
 # ConditionPathExists guard mirrored in friday.service (§8.1).
+#
+# Type=oneshot (not simple — a real bug, found via CI run 33357468619):
+# with Type=simple, systemd considers this unit "started" the instant the
+# process forks, so Before=friday.service only ordered the START ATTEMPT,
+# not completion — anything depending on this unit finishing (the boot
+# probe's `After=friday-firstboot.service`, and implicitly the intent
+# behind "Before=friday.service") raced ahead of the actual wizard run.
+# Type=oneshot makes systemd wait for the process to actually exit before
+# considering the unit done, which is what a run-once setup script always
+# needed. RemainAfterExit=yes keeps it showing "active (exited)" after
+# success rather than reverting to "inactive", which is the idiomatic
+# state for a completed oneshot and avoids it looking like it never ran.
 [Unit]
 Description=Friday first-boot wizard
 Before=friday.service
 ConditionPathExists=!/var/lib/friday/.firstboot-done
 
 [Service]
-Type=simple
+Type=oneshot
+RemainAfterExit=yes
 ExecStart=/usr/share/friday/firstboot/wizard.py
 Restart=on-failure
 RestartSec=5

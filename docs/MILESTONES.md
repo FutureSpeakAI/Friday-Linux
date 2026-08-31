@@ -499,6 +499,47 @@ mask holds (`systemctl is-enabled` should report `masked`, never
 `enabled`/a successful start) rather than trusting it silently. Not yet
 re-verified by a fresh boot — next dispatch is the check.
 
+**2026-08-31 — CI run 33357468619: the growpart mask worked, and two more
+real bugs found and fixed the same round.** Console log confirms the
+fix: `systemctl is-enabled bootc-generic-growpart.service` → `masked`;
+the guest's own `sgdisk -p` now shows partition 4 still at 16.0 GiB with
+`Total free space is 8386594 sectors (4.0 GiB)` — matching the host
+exactly, no more silent growth. `sgdisk -n 0:0:0 ...` ran with **no error
+this time** — the lockbox partition create step that has failed on every
+previous run finally got past its first real obstacle. Also confirmed
+for real, from the probe's own output: **`USR_WRITABLE=no (touch: cannot
+touch '/usr/.friday-boot-test-writeprobe': Read-only file system)`** —
+one of M0's three remaining acceptance lines (`/usr` read-only) is now
+directly verified, not inferred.
+
+Two more real bugs found while reading why the probe only captured a
+partial picture (it stopped right after the `sgdisk -n` line, with no
+visibility into whether the rest of the wizard — luksFormat, mkfs.btrfs,
+subvolumes, `.firstboot-done` — succeeded):
+1. `friday-firstboot.service` was `Type=simple`, which means systemd
+   considers a unit "started" the instant its process forks, not when it
+   exits. `friday-boot-test-probe.service`'s `After=friday-firstboot.service`
+   therefore raced ahead of the actual wizard run instead of waiting for
+   it to finish. Changed to `Type=oneshot` with `RemainAfterExit=yes` —
+   the correct semantic type for a run-once setup script, which also
+   fixes the ordering for real.
+2. `friday.service` is `WantedBy=multi-user.target`, so systemd attempts
+   to start it early in boot as part of reaching that target — long
+   before the lockbox exists. That attempt fails
+   (`Requires=friday-lockbox.mount` unsatisfiable yet — matches "Dependency
+   failed for friday.service" seen in earlier runs' logs) and systemd
+   does **not** automatically retry a unit whose job already failed once
+   its dependency later becomes available; `ConditionPathExists` is
+   checked once per start attempt, not watched continuously. Without an
+   explicit re-trigger, `friday.service` would simply never start on a
+   given boot even after everything it needs exists. Fixed:
+   `wizard.py`'s `main()` now explicitly runs `systemctl start
+   friday.service` right after writing the `.firstboot-done` marker.
+
+Not yet re-verified by a fresh boot with both fixes in place — next
+dispatch is the check, and should finally show whether `/api/health`
+responds and the lockbox actually completes end to end.
+
 ## M1-M4
 
 Not started. Per rule 4, they don't start until M0's checklist above is
