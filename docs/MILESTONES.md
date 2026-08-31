@@ -767,6 +767,29 @@ and all the now-familiar real confirmations repeated cleanly again:
 `bootc status` one deployment, `/usr` read-only, `/boot/efi` correct, all
 five subvolumes present. Not yet re-verified with the `--no-block` fix.
 
+**2026-08-31 — CI run 33406554274: the `--no-block` fix worked completely —
+`wizard.py` now finishes cleanly in ~78s with no hang or timeout
+anywhere, and every early check keeps confirming real success.** Full
+`/var/log/friday-firstboot.log` capture shows the whole run end to end
+without incident: lockbox created, all four subvolume mounts succeeded,
+journald signalled cleanly, `secrets.env` written, `.firstboot-done`
+written, `systemctl start --no-block friday.service` returned
+immediately (no timeout), and the unattended file was deleted per SPEC.md
+§7.6 — a totally clean run. `systemctl list-units --failed` → `0 loaded
+units listed` at ~78s (nothing failed yet). `/api/health` still did not
+respond within the full 300s host-side window, but the only data point
+available was from ~78s into boot — far too early to know whether
+`friday.service` (a full Python app: venv imports, memory database, etc.)
+was still legitimately starting, or had failed later for a reason no
+snapshot ever captured. **Added a second, delayed diagnostic**:
+`friday-boot-test-probe-late.timer` fires a matching probe at a fixed
+200s into boot (comfortably inside the 300s health-check window),
+dumping `systemctl status friday.service`, its full journal, `ss -tlnp`,
+and a direct in-guest `curl 127.0.0.1:3000/api/health` — giving real
+visibility into `friday.service`'s eventual fate instead of only ever
+seeing a too-early snapshot. `boot-test.yml` updated to display this
+block too. Not yet re-verified.
+
 ## M1-M4
 
 Not started. Per rule 4, they don't start until M0's checklist above is

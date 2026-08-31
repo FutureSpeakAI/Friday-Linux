@@ -295,6 +295,8 @@ COPY image/systemd/friday-caddy.service        /usr/lib/systemd/system/friday-ca
 COPY image/systemd/friday-kiosk.service        /usr/lib/systemd/system/friday-kiosk.service
 COPY image/systemd/friday-firstboot.service    /usr/lib/systemd/system/friday-firstboot.service
 COPY image/systemd/friday-boot-test-probe.service  /usr/lib/systemd/system/friday-boot-test-probe.service
+COPY image/systemd/friday-boot-test-probe-late.service /usr/lib/systemd/system/friday-boot-test-probe-late.service
+COPY image/systemd/friday-boot-test-probe-late.timer   /usr/lib/systemd/system/friday-boot-test-probe-late.timer
 COPY image/systemd/friday-boot-test-relay.service  /usr/lib/systemd/system/friday-boot-test-relay.service
 COPY image/etc/friday/os.env                   /etc/friday/os.env
 COPY image/greenboot/required.d/               /etc/greenboot/check/required.d/
@@ -320,8 +322,9 @@ COPY helper/friday-os-helper/                  /usr/libexec/friday/
 # deployments, not this image's first-ever boot (recorded in
 # docs/VERIFY.md — genuinely unverified from this sandbox either way).
 #
-# friday-boot-test-probe.service and friday-boot-test-relay.service are new,
-# not named in SPEC.md: both are ConditionPathExists-gated on
+# friday-boot-test-probe.service, friday-boot-test-probe-late.
+# service/.timer, and friday-boot-test-relay.service are new, not named in
+# SPEC.md: all are ConditionPathExists-gated on
 # /var/lib/friday/.provisioned-unattended (written only by the wizard when it
 # actually consumes a friday-unattended.yaml — i.e., only in unattended/CI
 # provisioning, never on a normal interactive install), so they are always
@@ -332,8 +335,16 @@ COPY helper/friday-os-helper/                  /usr/libexec/friday/
 # headless GitHub Actions QEMU boot with no SSH server enabled (§10.2) and
 # friday.service bound to loopback only (§8.1) — this is how that observation
 # happens without adding any permanent, always-on attack surface.
+# friday-boot-test-probe-late.timer (not the .service — the timer is what
+# needs [Install]/WantedBy=; it triggers the .service on its own schedule)
+# exists because the early probe fires right after wizard.py exits, too
+# soon to know whether friday.service (a full Python app) has actually
+# finished starting — CI runs so far only ever saw a snapshot from
+# seconds into boot. Fires once, 200s in, well inside boot-test.yml's
+# 300s health-check window.
 RUN systemctl enable friday-lockbox.mount friday.service friday-caddy.service \
         friday-firstboot.service friday-boot-test-probe.service \
+        friday-boot-test-probe-late.timer \
         friday-boot-test-relay.service nftables.service \
     && chmod 440 /etc/sudoers.d/friday-os-helper \
     && chmod 0755 /usr/libexec/friday/friday-os-helper \

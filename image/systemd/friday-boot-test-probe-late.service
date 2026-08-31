@@ -1,0 +1,28 @@
+# Friday Linux — NOT in SPEC.md; triggered by friday-boot-test-probe-late.timer
+# 200s into boot, specifically to see friday.service's real, eventual
+# status (started cleanly / still starting / failed and why) — the early
+# probe (friday-boot-test-probe.service) fires right after
+# image/firstboot/wizard.py exits, too soon to know whether a full Python
+# app has actually finished starting. See that unit's header for the full
+# rationale on why any of this exists and why it is always a no-op on a
+# real deployment.
+[Unit]
+Description=Friday Linux CI-only late boot probe: friday.service status after startup time
+ConditionPathExists=/var/lib/friday/.provisioned-unattended
+
+[Service]
+Type=oneshot
+StandardOutput=journal+console
+StandardError=journal+console
+ExecStart=/bin/sh -c '\
+  echo "FRIDAY-LATE-PROBE-BEGIN"; \
+  echo "--- systemctl status friday.service ---"; \
+  systemctl status friday.service --no-pager -l 2>&1; \
+  echo "--- journalctl -u friday.service (full) ---"; \
+  journalctl -u friday.service --no-pager 2>&1; \
+  echo "--- ss -tlnp (listening ports) ---"; \
+  ss -tlnp 2>&1; \
+  echo "--- curl 127.0.0.1:3000/api/health ---"; \
+  curl -fsS --max-time 3 http://127.0.0.1:3000/api/health 2>&1; \
+  echo; \
+  echo "FRIDAY-LATE-PROBE-END"'

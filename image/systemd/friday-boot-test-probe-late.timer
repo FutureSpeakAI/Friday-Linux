@@ -1,0 +1,22 @@
+# Friday Linux — NOT in SPEC.md; companion to friday-boot-test-probe.service
+# (see that unit's header for the full rationale). The EARLY probe fires
+# right after image/firstboot/wizard.py exits (a few tens of seconds into
+# boot) — too early to see whether friday.service, a full Python app,
+# has actually finished starting or ultimately failed. This timer fires a
+# second, LATE probe at a fixed point well within boot-test.yml's 300s
+# health-check window, so that run gets one real data point on
+# friday.service's eventual fate even when /api/health never answers.
+#
+# Gated the same way as every other CI-only unit in this image: inert
+# unless /var/lib/friday/.provisioned-unattended exists (unattended/CI
+# provisioning only, never a real interactive install).
+[Unit]
+Description=Friday Linux CI-only late boot probe timer (see friday-boot-test-probe-late.service)
+ConditionPathExists=/var/lib/friday/.provisioned-unattended
+
+[Timer]
+OnBootSec=200s
+AccuracySec=1s
+
+[Install]
+WantedBy=timers.target

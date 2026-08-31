@@ -222,6 +222,8 @@ jobs:
           sudo cat /tmp/console.log || echo "no console.log captured"
           echo "--- FRIDAY-BOOT-TEST-PROBE block only ---"
           sudo sed -n '/FRIDAY-BOOT-TEST-PROBE-BEGIN/,/FRIDAY-BOOT-TEST-PROBE-END/p' /tmp/console.log || true
+          echo "--- FRIDAY-LATE-PROBE block only (friday.service status ~200s in) ---"
+          sudo sed -n '/FRIDAY-LATE-PROBE-BEGIN/,/FRIDAY-LATE-PROBE-END/p' /tmp/console.log || true
 
       - name: Assert /usr is read-only, from the probe output
         run: |
