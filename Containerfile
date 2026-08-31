@@ -198,18 +198,27 @@ RUN semanage port -a -t http_port_t -p tcp 3000 \
 # confirmed to take effect (the denial's own tcontext changed from
 # ntop_port_t to http_port_t) but the connect was STILL denied — init_t
 # (the domain friday.service's process actually runs in; see
-# image/selinux/friday-network.te's header for the full finding) is not
+# image/selinux/friday_network.te's header for the full finding) is not
 # granted name_connect to ANY port type by Fedora's targeted policy by
 # default. `checkpolicy` (provides `checkmodule`) added for this —
 # `semodule_package`/`semodule` come from `policycoreutils`/
 # `policycoreutils-python-utils`, already present above.
+#
+# REAL BUILD FAILURE, CI run 33424454295: checkmodule requires the source
+# file's own base name (before the extension) to match the module name
+# declared inside it (`module friday_network 1.0;`) — the file was
+# originally named with a hyphen (`friday-network.te`), and checkmodule
+# refused outright: "Module name friday_network is different than the
+# output base filename friday-network". SELinux module names cannot
+# contain hyphens, so the file (not the module declaration) was renamed
+# to match, everywhere this Containerfile references it.
 RUN dnf install -y checkpolicy && dnf clean all
-COPY image/selinux/friday-network.te /tmp/friday-network.te
-RUN checkmodule -M -m -o /tmp/friday-network.mod /tmp/friday-network.te \
-    && semodule_package -o /tmp/friday-network.pp -m /tmp/friday-network.mod \
-    && semodule -i /tmp/friday-network.pp \
+COPY image/selinux/friday_network.te /tmp/friday_network.te
+RUN checkmodule -M -m -o /tmp/friday_network.mod /tmp/friday_network.te \
+    && semodule_package -o /tmp/friday_network.pp -m /tmp/friday_network.mod \
+    && semodule -i /tmp/friday_network.pp \
     && semodule -l | grep -w friday_network \
-    && rm -f /tmp/friday-network.mod /tmp/friday-network.pp /tmp/friday-network.te
+    && rm -f /tmp/friday_network.mod /tmp/friday_network.pp /tmp/friday_network.te
 
 # ── Build-time-only tooling for the venv-install step below ──────────────
 # `git` (to clone Agent-Friday at the pin) and `uv` (to create the venv) are

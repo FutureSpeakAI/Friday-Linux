@@ -881,6 +881,17 @@ confirming both `http_port_t` (now covering 3000 among others) and the
 pre-existing `ntop_port_t` range entries coexist as expected. Not yet
 re-verified.
 
+**2026-08-31 - CI run 33424454295: `podman build` failed again, a second
+simple, self-inflicted syntax bug in the same new step.** `checkmodule`'s
+error was again exact and immediate: `Module name friday_network is
+different than the output base filename friday-network` - checkmodule
+requires the source file's own base name to match the module name
+declared inside it (`module friday_network 1.0;`), and SELinux module
+names cannot contain hyphens. The file was named `friday-network.te`
+(hyphen); renamed to `friday_network.te` (underscore) everywhere it is
+referenced, since the module name itself cannot change. Not yet
+re-verified.
+
 ## M1-M4
 
 Not started. Per rule 4, they don't start until M0's checklist above is
