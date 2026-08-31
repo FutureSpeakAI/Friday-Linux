@@ -1,0 +1,35 @@
+// Friday Linux — custom SELinux policy module.
+//
+// REAL BOOT FAILURE, CI run 33420423832: after relabeling port 3000 as
+// http_port_t (docs/DECISIONS.md Deviation D-A18), the connect attempt
+// was STILL denied:
+//   avc: denied { name_connect } for pid=1617 comm="friday" dest=3000
+//   scontext=system_u:system_r:init_t:s0
+//   tcontext=system_u:object_r:http_port_t:s0 tclass=tcp_socket
+//   permissive=0
+// Confirmed the port relabel itself took effect (tcontext really is
+// http_port_t now, not ntop_port_t) — the remaining blocker is that
+// friday.service's process runs in the generic `init_t` domain (no
+// dedicated SELinux type was ever created for it, and it evidently does
+// not auto-transition to `unconfined_service_t` the way many generic
+// systemd-started executables do — a separate question worth
+// investigating later, not solved here), and `init_t` is not granted
+// `name_connect` to ANY port type by Fedora's targeted policy by default
+// — a deliberately narrow default for a domain meant for early-boot/init
+// work, not general network service listening.
+//
+// This module grants exactly the one permission actually needed: init_t
+// processes may name_connect on http_port_t-labeled TCP sockets. It does
+// not touch SELinux's enforcing mode (§0 rule 7 / §10.2: SELinux stays
+// enforcing, never permissive) and does not grant any broader permission
+// than this specific class/permission pair.
+module friday_network 1.0;
+
+require {
+    type init_t;
+    type http_port_t;
+    class tcp_socket name_connect;
+}
+
+#============= init_t ==============
+allow init_t http_port_t:tcp_socket name_connect;

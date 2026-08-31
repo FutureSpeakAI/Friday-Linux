@@ -701,6 +701,22 @@ silently made, for each place the spec's text couldn't be used verbatim.
   by `/api/health` responding (either alone is weaker evidence than both
   together).
 
+  **Correction, CI run 33420423832: the port relabel alone was NOT
+  sufficient.** The relabel itself is confirmed working (the denial's own
+  `tcontext` changed from `ntop_port_t` to `http_port_t`), but the
+  connect attempt is still denied — `init_t` (the domain friday.service's
+  process actually runs in — it does not auto-transition to
+  `unconfined_service_t` the way many generic systemd-started executables
+  do, a separate question worth investigating later, not solved here) is
+  not granted `name_connect` to ANY port type by Fedora's targeted policy
+  by default; that domain is deliberately narrow for early-boot/init
+  work. Added a small custom SELinux policy module
+  (`image/selinux/friday-network.te`, compiled and loaded at build time
+  via `checkmodule`/`semodule_package`/`semodule` — `checkpolicy` added
+  to the package list for `checkmodule`) granting exactly `allow init_t
+  http_port_t:tcp_socket name_connect;` — nothing broader, and SELinux
+  stays enforcing throughout (§0 rule 7 / §10.2). Not yet re-verified.
+
 - **Deviation D-A19 (lower priority, not fixed this pass, recorded so it
   does not cost someone else time later): `systemd-journald` repeats
   "Failed to open user journal file, falling back to system journal: No

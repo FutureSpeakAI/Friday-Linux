@@ -849,6 +849,24 @@ absence of any new `avc: denied` lines for port 3000, per the coordinating
 session's explicit instruction that either alone is weaker proof than
 both together.
 
+**2026-08-31 - CI run 33420423832: the port relabel took effect but was
+NOT sufficient on its own - `init_t` isn't granted `name_connect` to any
+port type by default.** Real confirmation the relabel worked: the same
+denial now shows `tcontext=system_u:object_r:http_port_t:s0` (was
+`ntop_port_t`) - but the connect is still denied, repeating the same
+pattern from ~78s onward. Fedora's targeted policy does not grant the
+generic `init_t` domain `name_connect` to any port type by default - it's
+a deliberately narrow domain for early-boot/init work, and
+friday.service's process apparently never transitions to a more
+permissive domain like `unconfined_service_t` the way many generic
+systemd-started executables do (a real, separate question worth
+investigating later). **Fixed**: added a small custom SELinux policy
+module (`image/selinux/friday-network.te`), compiled and loaded at build
+time (`checkmodule` / `semodule_package` / `semodule`, `checkpolicy`
+added to the package list), granting exactly `allow init_t
+http_port_t:tcp_socket name_connect;` - nothing broader. SELinux stays
+enforcing throughout. Not yet re-verified.
+
 ## M1-M4
 
 Not started. Per rule 4, they don't start until M0's checklist above is

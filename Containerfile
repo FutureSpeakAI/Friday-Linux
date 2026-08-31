@@ -193,6 +193,24 @@ RUN semanage port -a -t http_port_t -p tcp 3000 \
       || semanage port -m -t http_port_t -p tcp 3000 \
     && semanage port -l | grep -w 3000
 
+# ── Custom SELinux policy module (SPEC.md §8.1 FRIDAY_PORT) ─────────────
+# REAL BOOT FAILURE, CI run 33420423832: the port relabel above was
+# confirmed to take effect (the denial's own tcontext changed from
+# ntop_port_t to http_port_t) but the connect was STILL denied — init_t
+# (the domain friday.service's process actually runs in; see
+# image/selinux/friday-network.te's header for the full finding) is not
+# granted name_connect to ANY port type by Fedora's targeted policy by
+# default. `checkpolicy` (provides `checkmodule`) added for this —
+# `semodule_package`/`semodule` come from `policycoreutils`/
+# `policycoreutils-python-utils`, already present above.
+RUN dnf install -y checkpolicy && dnf clean all
+COPY image/selinux/friday-network.te /tmp/friday-network.te
+RUN checkmodule -M -m -o /tmp/friday-network.mod /tmp/friday-network.te \
+    && semodule_package -o /tmp/friday-network.pp -m /tmp/friday-network.mod \
+    && semodule -i /tmp/friday-network.pp \
+    && semodule -l | grep -w friday_network \
+    && rm -f /tmp/friday-network.mod /tmp/friday-network.pp /tmp/friday-network.te
+
 # ── Build-time-only tooling for the venv-install step below ──────────────
 # `git` (to clone Agent-Friday at the pin) and `uv` (to create the venv) are
 # not part of §6's BOM — they are not needed once the venv exists — but
