@@ -695,6 +695,27 @@ existing mountpoint does not inherit the label the policy expects for
 that path; a plausible related class of bug even where mounting itself
 had not visibly failed). Not yet re-verified.
 
+**2026-08-31 — CI run 33388339294: the `journalctl --flush`-shaped fix was
+needed after all — `systemctl restart systemd-journald.service` fixed the
+write error but broke console visibility for the rest of boot.** Console
+log confirms the restart itself worked cleanly this time (no more
+"Permission denied" — `Creating journal file
+/var/log/journal/<machine-id>/system.journal on a btrfs file system...`
+appears, then `Started systemd-journald.service`), but **every line of
+console output stops appearing immediately after that restart**, for the
+rest of the ~320s capture window — not just this wizard's own log lines,
+but systemd's own `[ OK ] Started ...` status lines too, which come from
+a different mechanism entirely. Whatever relays journal/status output to
+the QEMU serial console evidently does not survive `systemd-journald`
+fully stopping and respawning mid-boot. The actual boot may well have
+continued fine functionally; this specific run is just blind to it via
+the console-log capture method from that point on. Fixed **properly**
+this time (verified against the real `systemd-journald.service(8)` man
+page, not memory): `journalctl --flush` sends `SIGUSR1`, "request that
+journal data from /run/ is flushed to /var/ ... to make it persistent" —
+the daemon process itself never restarts, so there is nothing for a
+console-forwarding mechanism to lose track of. Not yet re-verified.
+
 ## M1-M4
 
 Not started. Per rule 4, they don't start until M0's checklist above is

@@ -297,8 +297,24 @@ def create_lockbox(partition: str, passphrase: str) -> None:
         # where mounting itself has not visibly failed).
         _run(["restorecon", "-R", str(mountpoint)], check=False)
         if unit == "var-log-journal.mount":
-            _log("restarting systemd-journald so it adopts the freshly mounted /var/log/journal")
-            _run(["systemctl", "restart", "systemd-journald.service"], check=False)
+            # REAL BUG, CI run 33388339294: `systemctl restart
+            # systemd-journald.service` fixed the original "Permission
+            # denied" write error, but it fully stops and respawns the
+            # daemon process — and every line of console output (systemd's
+            # own "[ OK ] Started ..." status lines included, not just
+            # this wizard's own journal-bound stdout) stopped appearing in
+            # the boot-test's captured serial console immediately after
+            # that restart, for the rest of the boot. Whatever forwards
+            # journal/status output to the serial console did not survive
+            # the daemon's full stop+start cycle. `journalctl --flush`
+            # (confirmed via the real systemd-journald.service(8) man
+            # page, not memory: it sends SIGUSR1, "request that journal
+            # data from /run/ is flushed to /var/ ... to make it
+            # persistent") accomplishes the same goal — journald adopts
+            # the now-mounted persistent storage — without restarting the
+            # daemon process at all.
+            _log("flushing journald's runtime journal to the freshly mounted persistent /var/log/journal")
+            _run(["journalctl", "--flush"], check=False)
 
     friday_uid = pwd.getpwnam("friday").pw_uid
     friday_gid = pwd.getpwnam("friday").pw_gid
