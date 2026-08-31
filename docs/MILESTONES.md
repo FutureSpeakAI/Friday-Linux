@@ -1075,6 +1075,30 @@ names cannot contain hyphens. The file was named `friday-network.te`
 referenced, since the module name itself cannot change. Not yet
 re-verified.
 
+## Post-M0: B5 regression investigation (2026-08-31)
+
+Commit e51a2f0 ("B5: repin to v5.9.0, remove seed-copy workaround, restore
+boot_critical_ok") regressed M0's passing state: CI run 33450793876 failed
+at `/api/health` within 300s, even though the console proved genuinely
+alive the whole window (a heartbeat counted steadily to 49) and lockbox/
+LUKS/btrfs setup completed identically to the last passing run. An audit
+sequence around 81s showed `unit=friday` going `res=success` then
+`res=failed` in well under a second — a fast crash loop in the app itself,
+not a hang — but `journalctl -u friday.service` came back "-- No entries
+--" due to Deviation D-A19's still-unfixed journald "Failed to open user
+journal file" issue, hiding the real traceback.
+
+**Fixed the actual blocker to diagnosis first** (Deviation D-A20): the
+journald issue was never about the *system* journal (unaffected — every
+M0 confirmation still holds), only per-user journal files under
+`/var/log/journal/<machine-id>/`, caused by the freshly-mounted `@journal`
+btrfs subvolume missing the `2755 root:systemd-journal` setgid ownership
+`tmpfiles.d/systemd.conf` requires there. Fixed with `systemd-tmpfiles
+--create --prefix=/var/log/journal` right after the mount. Next: rebuild,
+re-run the boot test, and read the real `journalctl -u friday.service`
+output to find `friday.service`'s actual crash reason — not yet done as
+of this entry.
+
 ## M1-M4
 
 Not started. Per rule 4, they don't start until M0's checklist above is

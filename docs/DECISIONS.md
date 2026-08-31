@@ -758,6 +758,24 @@ silently made, for each place the spec's text couldn't be used verbatim.
   touches the first-boot wizard's `@journal` handling, rather than left
   to be silently rediscovered.
 
+- **Deviation D-A20: fixed D-A19's journald "Failed to open user journal
+  file" for real — it was actively blocking diagnosis of a real
+  regression (B5's repin to v5.9.0, commit e51a2f0), not just a nuisance.**
+  Confirmed against systemd's own real `tmpfiles.d/systemd.conf` source
+  (not memory): `/var/log/journal` must be mode `2755`, owned
+  `root:systemd-journal` (setgid, so journald's own per-user journal
+  files created under it inherit that group). A plain `btrfs subvolume
+  create` gives a fresh subvolume default `root:root` ownership with no
+  setgid bit — wrong for this path, and the actual cause of "Failed to
+  open **user** journal file" (the *system* journal was never affected,
+  which is why every real confirmation elsewhere in this project's M0
+  pass — `bootc status`, `/usr` read-only, the lockbox subvolumes — kept
+  working regardless). Fixed in `image/firstboot/wizard.py`:
+  `systemd-tmpfiles --create --prefix=/var/log/journal` right after the
+  `@journal` mount succeeds, before the existing `SIGUSR1` signal —
+  re-applies the real, shipped tmpfiles.d rule to the freshly-mounted
+  directory, the same mechanism that sets this up on any normal boot.
+
 - **Executable bits are set in the Containerfile, not relied on from git.**
   Confirmed via `git ls-files -s` after committing: every file this repo
   tracks landed as mode `100644`, including the `.sh` scripts and the

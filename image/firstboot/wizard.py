@@ -352,6 +352,28 @@ def create_lockbox(partition: str, passphrase: str) -> None:
             # to hang on. `_run()`'s new default 60s timeout is a second,
             # independent safety net in case anything else about this
             # step is what was actually stalling.
+            # REAL ROOT CAUSE, found 2026-08-31 while diagnosing a
+            # regression this journald quirk was actively hiding
+            # (CI run 33450793876): "systemd-journald[NNN]: Failed to
+            # open user journal file, falling back to system journal: No
+            # such file or directory" was never actually about the
+            # *system* journal (which works, and is what every real
+            # confirmation in this project's M0 pass has relied on) — it
+            # is journald failing to create/open a PER-USER journal file
+            # under /var/log/journal/<machine-id>/. Confirmed against
+            # systemd's own real tmpfiles.d/systemd.conf source (not
+            # memory): `/var/log/journal` itself must be mode 2755
+            # (setgid), owned root:systemd-journal, so files journald
+            # creates there for a given UID's session inherit that
+            # group. A plain `btrfs subvolume create` gives a fresh
+            # subvolume default root:root ownership with no setgid bit —
+            # exactly wrong for this path. `systemd-tmpfiles --create`
+            # re-applies the real, shipped tmpfiles.d rule to this now-
+            # mounted directory (the same mechanism that sets it up on
+            # any normal first boot, just run again here since our mount
+            # happens live, well after tmpfiles' own early-boot pass).
+            _log("re-applying tmpfiles.d ownership/permissions to the freshly mounted /var/log/journal")
+            _run(["systemd-tmpfiles", "--create", "--prefix=/var/log/journal"], check=False)
             _log("signalling journald (SIGUSR1) to flush its runtime journal to the freshly mounted persistent /var/log/journal")
             _run(["systemctl", "kill", "--signal=SIGUSR1", "systemd-journald.service"], check=False)
 
