@@ -476,6 +476,29 @@ needs to be told to stop (or constrained to the disk.toml-specified 16
 GiB) before the wizard's free-space-claiming logic can ever succeed on
 real, larger media, not just in this CI test.
 
+**2026-08-31 — CI run 33353739418: ROOT CAUSE CONFIRMED for real, not
+guessed.** `systemd-repart.service` is independently ruled out — its own
+journal line: `systemd-repart.service - Repartition Root Disk skipped, no
+trigger condition checks were met` (no `/usr/lib/repart.d` config exists
+in this image, confirmed by `find` coming back empty). The real
+mechanism, found in the same run's console log:
+`bootc-generic-growpart.service - Bootc Fallback Root Filesystem Grow`
+started and completed successfully at boot. This is `bootc`'s own,
+documented fallback behavior for a "generic" install — visible in
+`bootc-image-builder`'s own manifest log from earlier runs: it invokes
+`bootc install to-filesystem --source-imgref ... --generic-image ...`
+internally, and `--generic-image` is exactly what installs this
+fallback unit, whose entire purpose is to grow root to fill whatever disk
+a generic image lands on. This is the correct, intended behavior for a
+generic bootc image in general — and precisely the opposite of what
+SPEC.md §5/ADR-004 want for Friday Linux specifically (a genuinely
+fixed-size root with the remainder left for the lockbox). **Fixed**:
+`RUN systemctl mask bootc-generic-growpart.service` added to the
+Containerfile; `wizard.py`'s diagnostic step now permanently confirms the
+mask holds (`systemctl is-enabled` should report `masked`, never
+`enabled`/a successful start) rather than trusting it silently. Not yet
+re-verified by a fresh boot — next dispatch is the check.
+
 ## M1-M4
 
 Not started. Per rule 4, they don't start until M0's checklist above is

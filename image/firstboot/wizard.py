@@ -336,31 +336,23 @@ def seed_app_setup_marker() -> None:
 
 
 def _diagnose_partition_growth() -> None:
-    """DIAGNOSTIC (CI run 33350200049): partition 4 (root) measured 16.0
-    GiB right after bootc-image-builder + the host-side "Grow the disk"
-    step (End=36683742), but the GUEST's own sgdisk -p sees it as 20.0 GiB
-    (End=45072350 — the disk's actual last usable sector), with "Total
-    free space is 0 sectors." Something grows the ROOT PARTITION TABLE
-    ENTRY itself (not just a filesystem within it) to consume all
-    available space before this wizard ever runs. systemd's GPT
-    GROWFS attribute (bit 59, confirmed via the real Discoverable
-    Partitions Specification, not memory) only grows a FILESYSTEM to fill
-    its EXISTING partition — it does not explain the partition table entry
-    itself changing size, so that is not the mechanism. `systemd-repart`
-    is the next real candidate (it can grow a partition into following
-    free space at boot, which is exactly this symptom) — logging its
-    config and any log evidence here rather than guessing a fix.
+    """CI run 33350200049 found partition 4 (root) silently grown from the
+    disk.toml-specified 16 GiB to fill the entire disk before this wizard
+    ever ran. CI run 33353739418 root-caused it for real:
+    `bootc-generic-growpart.service - Bootc Fallback Root Filesystem Grow`
+    started successfully at boot (`bootc install to-filesystem
+    --generic-image`, which `bootc-image-builder` invokes internally,
+    installs this fallback unit so a generic image fills whatever disk it
+    lands on — the opposite of what SPEC.md §5/ADR-004 want for Friday
+    Linux specifically). `systemd-repart.service` was independently ruled
+    out (its own log: "skipped, no trigger condition checks were met" —
+    no /usr/lib/repart.d config exists). Fixed in the Containerfile:
+    `systemctl mask bootc-generic-growpart.service`. This check confirms
+    the mask actually holds at every boot, rather than trusting it
+    silently — a masked unit should report "masked" here, never
+    "started"/"success".
     """
-    _log("--- diagnosing partition-4 growth (see wizard.py docstring) ---")
-    # Filtered, not a full journalctl -b dump: the full boot journal is
-    # thousands of lines and would flood this already-verbose console log.
-    _run(["sh", "-c",
-          "journalctl -b --no-pager | grep -iE 'repart|growfs|resiz|GPT|partition table' || true"],
-         check=False)
-    _run(["find", "/usr/lib/repart.d", "/etc/repart.d", "-type", "f"], check=False)
-    _run(["systemctl", "status", "systemd-repart.service"], check=False)
-    _run(["journalctl", "-b", "-u", "systemd-repart", "--no-pager"], check=False)
-    _log("--- end partition-4 growth diagnosis ---")
+    _run(["systemctl", "is-enabled", "bootc-generic-growpart.service"], check=False)
 
 
 def main() -> int:

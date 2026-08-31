@@ -351,6 +351,25 @@ RUN systemctl enable friday-lockbox.mount friday.service friday-caddy.service \
 # keys generated."
 RUN systemctl disable sshd.service
 
+# ── Disable bootc's generic-image auto-grow fallback (SPEC.md §5) ───────
+# REAL FINDING, CI run 33353739418: root grew from the disk.toml-specified
+# 16 GiB to fill the ENTIRE disk at every boot (confirmed via the boot
+# probe's diagnostic: `bootc-generic-growpart.service - Bootc Fallback
+# Root Filesystem Grow` started successfully; `systemd-repart.service`
+# was independently confirmed as NOT the mechanism — its own log says
+# "skipped, no trigger condition checks were met," since no
+# /usr/lib/repart.d config exists in this image). `bootc-image-builder`
+# invokes `bootc install to-filesystem --generic-image` internally (seen
+# in its own manifest log), and that flag is what installs this fallback
+# unit — it exists so a genuinely generic bootc image (no known target
+# disk size) still fills whatever disk it lands on. SPEC.md §5/ADR-004
+# want the opposite for Friday Linux specifically: a FIXED 16 GiB root
+# with the remainder left for the first-boot wizard to claim as the
+# lockbox. Masking (not just disabling) so nothing can start it via a
+# dependency either — this is a deliberate, permanent product choice for
+# this image, not a temporary workaround.
+RUN systemctl mask bootc-generic-growpart.service
+
 # ── Prohibited-shortcut guard (SPEC.md §0 rule 7) ────────────────────────
 # Not a real check yet — a placeholder for the CI lint step named in
 # docs/DECISIONS.md's not-yet-written CI section: no service may bind
