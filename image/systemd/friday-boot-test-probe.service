@@ -25,8 +25,12 @@ StandardOutput=journal+console
 StandardError=journal+console
 ExecStart=/bin/sh -c '\
   echo "FRIDAY-BOOT-TEST-PROBE-BEGIN"; \
-  echo "--- journalctl -u friday-firstboot (full) ---"; \
-  journalctl -u friday-firstboot --no-pager 2>&1; \
+  echo "--- /var/log/friday-firstboot.log (real, unexplained: journalctl -u friday-firstboot has come up empty here even right after a provably successful run — docs/DECISIONS.md) ---"; \
+  cat /var/log/friday-firstboot.log 2>&1; \
+  echo "--- journalctl -u friday-firstboot.service (full, explicit suffix) ---"; \
+  journalctl -u friday-firstboot.service --no-pager 2>&1; \
+  echo "--- journalctl -t wizard.py (by syslog identifier instead of unit) ---"; \
+  journalctl -t wizard.py --no-pager 2>&1; \
   echo "--- journalctl -u friday.service (last 100 lines) ---"; \
   journalctl -u friday.service --no-pager -n 100 2>&1; \
   echo "--- systemctl list-units --failed ---"; \

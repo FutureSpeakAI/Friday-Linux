@@ -37,6 +37,16 @@ FIRSTBOOT_DONE = Path("/var/lib/friday/.firstboot-done")
 PROVISIONED_MARKER = Path("/var/lib/friday/.provisioned-unattended")
 SECRETS_ENV = Path("/var/lib/friday/secrets.env")
 
+# Real, unexplained anomaly (CI runs 33370623731 and its predecessor):
+# `journalctl -u friday-firstboot` reports "-- No entries --" even
+# immediately after this script has provably run (lockbox created,
+# subvolumes made, /friday/lockbox mounted — all independently confirmed
+# by other commands in the same probe capture). Not chased to a root
+# cause — worked around instead: every _log() call also appends to a
+# plain file, which cannot be affected by whatever is making the
+# journal query come up empty for this unit.
+FIRSTBOOT_LOG = Path("/var/log/friday-firstboot.log")
+
 # UNVERIFIED (SPEC.md §7.6; the exact mount path Fedora/bootc uses for the
 # ESP at runtime is not confirmed from this sandbox — standard GRUB2-EFI
 # convention, checked by the CI boot test's console probe).
@@ -64,7 +74,14 @@ SUBVOLUME_MOUNTS = (
 
 
 def _log(msg: str) -> None:
-    print(f"[firstboot] {msg}", flush=True)
+    line = f"[firstboot] {msg}"
+    print(line, flush=True)
+    try:
+        FIRSTBOOT_LOG.parent.mkdir(parents=True, exist_ok=True)
+        with open(FIRSTBOOT_LOG, "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    except OSError:
+        pass  # the journal is still the primary record; this is a backup
 
 
 def _run(cmd: list[str], *, input_bytes: bytes | None = None, check: bool = True) -> subprocess.CompletedProcess:

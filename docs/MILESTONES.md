@@ -619,6 +619,27 @@ wizard executed, an unexplained oddity noted here rather than chased
 further right now since it isn't blocking — the next run's fuller,
 per-unit diagnostics should clarify incidentally.
 
+**2026-08-31 — CI run 33370623731: same result reproduced exactly**
+(different image digest, `sha256:26fd3cf6e46623f4a0e6c0ffc98386fada29d97
+829cd9abcf379c2a75ded3b02`, still exactly one deployment; `/usr`
+read-only; five subvolumes; `/boot/efi` confirmed; `home-friday.mount`
+still failed) — confirming this is a real, reproducible bug, not a
+one-off flake. The new per-unit `journalctl -u <unit>` diagnostic added
+last round did **not** appear anywhere in the probe's capture, and
+`journalctl -u friday-firstboot`/`-u friday.service` again reported "--
+No entries --" despite unambiguous proof the wizard ran (the lockbox,
+subvolumes, and mount all exist). This journal-query anomaly is now
+reproduced twice and is actively hiding the real `@home` failure reason.
+Rather than chase the journal mystery itself further, worked around it:
+`wizard.py`'s `_log()` now also appends every line to a plain file,
+`/var/log/friday-firstboot.log`, which cannot be affected by whatever is
+making the journal query come up empty for this unit — the boot probe
+now `cat`s that file first, plus two alternate journalctl queries
+(explicit `.service` suffix, and `-t wizard.py` by syslog identifier) in
+case either of those turns out to work where `-u friday-firstboot`
+doesn't. Not yet re-verified — next dispatch should finally reveal why
+`@home` specifically fails to mount.
+
 ## M1-M4
 
 Not started. Per rule 4, they don't start until M0's checklist above is
