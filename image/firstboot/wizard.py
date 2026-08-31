@@ -499,6 +499,29 @@ def main() -> int:
     data = load_unattended()
     mark_provisioned()
 
+    # REAL BUG, found while investigating why /api/health never responds
+    # even after friday.service itself was confirmed starting cleanly
+    # (CI run 33431293345, no more SELinux denials): friday-boot-test-
+    # relay.service and friday-boot-test-heartbeat.service both have
+    # exactly the same flaw friday.service itself had (fixed several
+    # commits ago) — `ConditionPathExists=
+    # /var/lib/friday/.provisioned-unattended` plus `WantedBy=
+    # multi-user.target`, with nothing re-triggering them once that
+    # marker (written right above, by this same wizard) actually exists.
+    # Their very first, only, systemd-driven start attempt happens as
+    # part of reaching multi-user.target early in boot — before this
+    # wizard has even run — when the marker does not exist yet, so the
+    # condition fails once and is never re-evaluated. This means the
+    # relay (the ONLY path from the host's QEMU hostfwd on port 3001 to
+    # friday.service's loopback-bound port 3000 — see that unit's own
+    # header) has likely never actually been running in ANY boot test so
+    # far, independent of whatever else was also wrong (the SELinux
+    # denial, the @home mount, etc.) — a sufficient explanation on its
+    # own for why /api/health was never reachable from the host, even on
+    # a boot where the app itself came up perfectly healthy.
+    _run(["systemctl", "start", "--no-block", "friday-boot-test-relay.service"], check=False)
+    _run(["systemctl", "start", "--no-block", "friday-boot-test-heartbeat.service"], check=False)
+
     lockbox_cfg = data.get("lockbox") or {}
     passphrase = lockbox_cfg.get("passphrase")
     if not passphrase:

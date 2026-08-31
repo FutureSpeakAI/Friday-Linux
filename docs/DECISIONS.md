@@ -717,6 +717,26 @@ silently made, for each place the spec's text couldn't be used verbatim.
   http_port_t:tcp_socket name_connect;` — nothing broader, and SELinux
   stays enforcing throughout (§0 rule 7 / §10.2). Not yet re-verified.
 
+  **Confirmed working, CI run 33431293345: no `avc: denied` lines for
+  port 3000 anywhere in the log, and `friday.service` itself now starts
+  cleanly (`[ OK ] Started friday.service.`).** `/api/health` still did
+  not respond, and a second, independent bug was found causing it —
+  `friday-boot-test-relay.service` (the CI-only relay that makes port
+  3000 reachable from the host at all — see that unit's own header) had
+  the *exact same* "condition checked once too early, never retried" flaw
+  `friday.service` itself had before Deviation D-A17's fix: it is
+  `ConditionPathExists`-gated on the same `.provisioned-unattended`
+  marker plus plain `WantedBy=multi-user.target`, with nothing
+  re-triggering it once that marker actually exists. This means the relay
+  has likely never actually been running in *any* boot test so far —
+  sufficient on its own to explain every prior `/api/health` failure,
+  independent of the SELinux and `@home`-mount fixes that were also
+  genuinely necessary. Fixed the same way: `wizard.py` now explicitly
+  runs `systemctl start --no-block friday-boot-test-relay.service` (and
+  the same for `friday-boot-test-heartbeat.service`, which had the
+  identical flaw) right after writing the `.provisioned-unattended`
+  marker. Not yet re-verified.
+
 - **Deviation D-A19 (lower priority, not fixed this pass, recorded so it
   does not cost someone else time later): `systemd-journald` repeats
   "Failed to open user journal file, falling back to system journal: No

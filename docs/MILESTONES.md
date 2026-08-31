@@ -881,6 +881,29 @@ confirming both `http_port_t` (now covering 3000 among others) and the
 pre-existing `ntop_port_t` range entries coexist as expected. Not yet
 re-verified.
 
+**2026-08-31 - CI run 33431293345: the SELinux fix worked completely, and
+a second, independent, likely-decisive bug was found - the CI relay had
+the same "never retried" flaw `friday.service` itself had.** Real
+confirmation: zero `avc: denied` lines anywhere in this run's log, and
+`[ OK ] Started friday.service.` appears cleanly (no more
+`avc: denied { name_connect }`). `/api/health` STILL did not respond -
+but this time the reason is clear and separate: `friday-boot-test-relay.
+service` (the only path from the host's QEMU hostfwd on port 3001 to
+friday.service's loopback-bound port 3000) has the exact same bug
+`friday.service` itself had several commits ago -
+`ConditionPathExists=/var/lib/friday/.provisioned-unattended` plus plain
+`WantedBy=multi-user.target`, with nothing re-triggering it once that
+marker actually exists. Its only systemd-driven start attempt happens
+early in boot, before the marker exists, so the condition fails once and
+is never retried - meaning the relay has likely never actually been
+running in *any* boot test so far, regardless of whatever else was also
+wrong. This alone is a sufficient explanation for every previous
+`/api/health` failure. **Fixed**: `wizard.py` now explicitly runs
+`systemctl start --no-block friday-boot-test-relay.service` (and the
+same for `friday-boot-test-heartbeat.service`, which had the identical
+flaw) right after writing the `.provisioned-unattended` marker. This
+could be the decisive fix - not yet re-verified.
+
 **2026-08-31 - CI run 33424454295: `podman build` failed again, a second
 simple, self-inflicted syntax bug in the same new step.** `checkmodule`'s
 error was again exact and immediate: `Module name friday_network is
