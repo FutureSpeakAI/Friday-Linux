@@ -540,6 +540,25 @@ Not yet re-verified by a fresh boot with both fixes in place — next
 dispatch is the check, and should finally show whether `/api/health`
 responds and the lockbox actually completes end to end.
 
+**2026-08-31 — CI run 33361356886: `sgdisk -n` succeeded for real this
+time (`Total free space is 8386594 sectors (4.0 GiB)` before, partition 5
+created after, `Operation has completed successfully`), and then hit one
+more real, simple bug that killed `create_lockbox_partition()`'s own
+device-name detection.** `lsblk -no NAME <disk>` defaults to tree-view
+output, gluing box-drawing glyphs onto device names whenever a device has
+siblings — e.g. `├─vda1`, `└─vda4` — with no whitespace separating the
+glyph from the name, so `.split()` kept them glued together. Adding a
+fifth partition changes which existing entries are "last" in the tree
+(`└─` vs `├─`), so the `after - before` set difference picked up the
+glyph-mangled `├─vda4` as a spurious "new" entry alongside the real
+`vda5`, and `sorted(...)[-1]` chose the mangled one — the log shows the
+resulting nonsense literally: `new lockbox partition: /dev/├─vda4`,
+followed by `cryptsetup ... /dev/├─vda4` failing with "Device
+/dev/├─vda4 does not exist." Fixed: added `-l`/`--list` to every `lsblk
+... NAME` call in `create_lockbox_partition()`, which forces plain list
+output with no tree formatting. Not yet re-verified — next dispatch is
+the check.
+
 ## M1-M4
 
 Not started. Per rule 4, they don't start until M0's checklist above is

@@ -160,16 +160,25 @@ def create_lockbox_partition(disk: str) -> str:
     # views disagree and only one of them is visible so far.
     _run(["blockdev", "--getsize64", disk], check=False)
     _run(["sgdisk", "-p", disk], check=False)
-    before = set(_run(["lsblk", "-no", "NAME", disk]).stdout.decode().split())
+    # REAL BUG, CI run 33361356886: plain `lsblk -no NAME` uses tree-view
+    # glyphs (├─, └─) by default whenever a device has children, e.g.
+    # "├─vda1" / "└─vda4" — NOT separated from the device name by
+    # whitespace, so `.split()` on the output kept the glyphs glued to the
+    # name. Adding a fifth partition changes which existing entries are
+    # "last" in the tree (└─ vs ├─), so `after - before` picked up the
+    # glyph-mangled "├─vda4" as a "new" entry alongside the real "vda5" —
+    # and `sorted(...)[-1]` chose the mangled one. `-l`/`--list` forces
+    # plain list output with no tree formatting at all.
+    before = set(_run(["lsblk", "-l", "-no", "NAME", disk]).stdout.decode().split())
     _run(["sgdisk", "-n", "0:0:0", "-t", "0:8309", "-c", "0:friday-lockbox", disk])
     _run(["udevadm", "settle"])
-    after = set(_run(["lsblk", "-no", "NAME", disk]).stdout.decode().split())
+    after = set(_run(["lsblk", "-l", "-no", "NAME", disk]).stdout.decode().split())
     new_names = sorted(after - before)
     if not new_names:
         # udev can lag; give it one more chance before giving up.
         time.sleep(2)
         _run(["udevadm", "settle"])
-        after = set(_run(["lsblk", "-no", "NAME", disk]).stdout.decode().split())
+        after = set(_run(["lsblk", "-l", "-no", "NAME", disk]).stdout.decode().split())
         new_names = sorted(after - before)
     if not new_names:
         raise RuntimeError(f"sgdisk reported success but no new block device appeared under {disk}")
