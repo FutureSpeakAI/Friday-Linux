@@ -98,7 +98,8 @@ def _log(msg: str) -> None:
         pass  # the journal is still the primary record; this is a backup
 
 
-def _run(cmd: list[str], *, input_bytes: bytes | None = None, check: bool = True) -> subprocess.CompletedProcess:
+def _run(cmd: list[str], *, input_bytes: bytes | None = None, check: bool = True,
+         timeout: float = 60.0) -> subprocess.CompletedProcess:
     """Every prior version of this function used capture_output=True and
     never printed the captured stdout/stderr anywhere — meaning every
     command failure so far (e.g. CI run 33343357304's `sgdisk` exit status
@@ -109,10 +110,32 @@ def _run(cmd: list[str], *, input_bytes: bytes | None = None, check: bool = True
     friday-boot-test-probe.service already dumps that journal to the
     console — so printing the captured output here, always, is enough to
     make it visible without changing anything else.
+
+    A default 60s timeout was added after CI runs 33388339294 and
+    33393997810: the console (and this script's own log, journal or
+    plain-file both) went silent right after the `@journal` mount in
+    BOTH runs, with no boot-test probe ever firing (its `After=
+    friday-firstboot.service`, Type=oneshot, would wait for this script
+    to exit — indefinitely, since `friday-firstboot.service` itself sets
+    `TimeoutStartSec=infinity`). No command run by this script had ever
+    had a timeout, so a single hung subprocess (the live suspect:
+    `journalctl --flush`, which synchronously waits for journald to
+    confirm the flush) would silently wedge the entire first boot
+    forever, with nothing to report why. Now a hang raises
+    `TimeoutExpired` instead — loud and diagnosable — rather than an
+    unbounded, silent stall.
     """
     _log(f"$ {' '.join(cmd)}")
-    result = subprocess.run(cmd, input=input_bytes, check=False,
-                             capture_output=True, text=False)
+    try:
+        result = subprocess.run(cmd, input=input_bytes, check=False,
+                                 capture_output=True, text=False, timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        _log(f"  TIMED OUT after {timeout}s")
+        if exc.stdout:
+            _log(f"  stdout so far: {exc.stdout.decode('utf-8', errors='replace').rstrip()}")
+        if exc.stderr:
+            _log(f"  stderr so far: {exc.stderr.decode('utf-8', errors='replace').rstrip()}")
+        raise
     for stream_name, data in (("stdout", result.stdout), ("stderr", result.stderr)):
         if data:
             text = data.decode("utf-8", errors="replace").rstrip()
@@ -313,8 +336,24 @@ def create_lockbox(partition: str, passphrase: str) -> None:
             # persistent") accomplishes the same goal — journald adopts
             # the now-mounted persistent storage — without restarting the
             # daemon process at all.
-            _log("flushing journald's runtime journal to the freshly mounted persistent /var/log/journal")
-            _run(["journalctl", "--flush"], check=False)
+            #
+            # REAL SUSPECTED BUG, CI runs 33388339294 and 33393997810:
+            # `journalctl --flush` still left the console (and this
+            # script's own logging, journal or plain-file both) silent
+            # for the rest of both boots, with the boot-test probe never
+            # firing at all — consistent with `journalctl --flush`
+            # hanging rather than restarting cleanly, since that command
+            # is documented to synchronously wait for journald to confirm
+            # the flush completed, not just send the signal and return.
+            # Switched to `systemctl kill --signal=SIGUSR1
+            # systemd-journald.service`, which requests the exact same
+            # flush-to-persistent action but is fire-and-forget — nothing
+            # here waits for journald to answer, so there is nothing left
+            # to hang on. `_run()`'s new default 60s timeout is a second,
+            # independent safety net in case anything else about this
+            # step is what was actually stalling.
+            _log("signalling journald (SIGUSR1) to flush its runtime journal to the freshly mounted persistent /var/log/journal")
+            _run(["systemctl", "kill", "--signal=SIGUSR1", "systemd-journald.service"], check=False)
 
     friday_uid = pwd.getpwnam("friday").pw_uid
     friday_gid = pwd.getpwnam("friday").pw_gid

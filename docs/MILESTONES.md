@@ -716,6 +716,29 @@ journal data from /run/ is flushed to /var/ ... to make it persistent" —
 the daemon process itself never restarts, so there is nothing for a
 console-forwarding mechanism to lose track of. Not yet re-verified.
 
+**2026-08-31 — CI run 33393997810: `journalctl --flush` did NOT fix
+console visibility — same exact symptom, console goes silent right after
+the `@journal` mount, no boot-test probe ever fires.** All four subvolume
+mounts still succeeded cleanly (confirmed in the console log up to that
+point), but nothing at all appears afterward, in either this run or the
+`--flush` run, for the rest of the ~320s test window. Live suspect: the
+wizard's own process is genuinely **hanging**, not just becoming
+invisible on console — `journalctl --flush` is documented to
+synchronously wait for journald to confirm the flush completed (not just
+send a signal and return), and no `_run()` call in `wizard.py` had ever
+had a timeout; combined with `friday-firstboot.service`'s own
+`TimeoutStartSec=infinity` and the boot-test probe's `After=
+friday-firstboot.service` (`Type=oneshot`, which only proceeds once that
+unit's process actually exits), a single hung subprocess call would
+silently wedge the entire first boot forever with nothing to report why —
+consistent with what both of the last two runs show. Fixed two ways:
+(1) `_run()` now has a default 60s timeout, raising `TimeoutExpired`
+(loud, logged) instead of hanging silently; (2) switched the journald
+signal from `journalctl --flush` (waits for confirmation) to `systemctl
+kill --signal=SIGUSR1 systemd-journald.service` (fire-and-forget —
+requests the identical flush action with nothing left to hang on). Not
+yet re-verified.
+
 ## M1-M4
 
 Not started. Per rule 4, they don't start until M0's checklist above is
