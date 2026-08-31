@@ -867,6 +867,20 @@ added to the package list), granting exactly `allow init_t
 http_port_t:tcp_socket name_connect;` - nothing broader. SELinux stays
 enforcing throughout. Not yet re-verified.
 
+**2026-08-31 - CI run 33421893589: `podman build` itself failed - simple,
+self-inflicted syntax bug in the new `.te` file.** `checkmodule`'s error
+was exact and immediate: `Building a policy module, but no module
+specification found... at token '//' on line 1`. SELinux `.te` policy
+files use shell-style `#` comments, not C/C++ `//` - the whole file's
+header comment block used `//` throughout. Fixed by converting every
+comment to `#`. Real, useful confirmation from the same failed run before
+it died: `checkpolicy` was already present in the base image
+("already installed... Nothing to do"), and the port relabel step's own
+verification line printed the real, current port-3000 policy table,
+confirming both `http_port_t` (now covering 3000 among others) and the
+pre-existing `ntop_port_t` range entries coexist as expected. Not yet
+re-verified.
+
 ## M1-M4
 
 Not started. Per rule 4, they don't start until M0's checklist above is
