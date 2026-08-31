@@ -273,6 +273,32 @@ def create_lockbox(partition: str, passphrase: str) -> None:
         if result.returncode != 0:
             _log(f"{unit} failed to start — dumping its journal:")
             _run(["journalctl", "-u", unit, "--no-pager", "-n", "50"], check=False)
+            continue
+        # REAL BUG, CI run 33383110581: all four subvolumes mounted
+        # cleanly this time (the @home fix held), but mounting
+        # /var/log/journal LIVE, out from under the systemd-journald
+        # instance that has been actively writing to the OLD (sealed-OS)
+        # /var/log/journal since early boot, broke it:
+        # "systemd-journald[644]: Failed to open /var/log/journal/
+        # <machine-id>: Permission denied" — and every log line after
+        # that point vanished from this run's console capture entirely,
+        # never mind the boot-test probe. This plausibly explains the
+        # earlier, separately-chased "journalctl -u friday-firstboot
+        # comes up empty" anomaly too: once journald can't write/reopen
+        # its own active journal, historical queries against anything it
+        # was mid-write on can come up empty. Fixed with the standard fix
+        # for "the backing storage under journald's feet just changed":
+        # restart the daemon so it reopens against the new, now-mounted
+        # location instead of continuing to reference the one that just
+        # got shadowed. SELinux relabeling (`restorecon`) is also applied
+        # to every freshly-mounted subvolume — new content under an
+        # existing mountpoint does not inherit the label the policy
+        # expects for that path (a plausible related class of bug even
+        # where mounting itself has not visibly failed).
+        _run(["restorecon", "-R", str(mountpoint)], check=False)
+        if unit == "var-log-journal.mount":
+            _log("restarting systemd-journald so it adopts the freshly mounted /var/log/journal")
+            _run(["systemctl", "restart", "systemd-journald.service"], check=False)
 
     friday_uid = pwd.getpwnam("friday").pw_uid
     friday_gid = pwd.getpwnam("friday").pw_gid

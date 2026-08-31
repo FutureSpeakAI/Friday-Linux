@@ -667,6 +667,34 @@ explicit `home-friday.mount` unit — fixing the mount should resolve both
 in the same run. Not yet re-verified — next dispatch is the real test of
 whether `friday.service` (and therefore `/api/health`) finally comes up.
 
+**2026-08-31 — CI run 33383110581: all four subvolume mounts succeeded
+cleanly for the first time (the `@home` fix held completely), and a new
+real bug then surfaced: mounting `/var/log/journal` live broke the
+running `systemd-journald` instance.** Console log shows, in order:
+`friday-lockbox.mount` mounted, then `var-home-friday.mount`,
+`var-lib-friday-models.mount`, `var-lib-friday-workshop.mount`, and
+`var-log-journal.mount` — all four `[ OK ] Mounted ...` with zero
+failures. Then: `systemd-journald[644]: Failed to open
+/var/log/journal/<machine-id>: Permission denied`, and **every console
+log line after that point simply stops appearing** — not just the boot
+probe (which never ran, no `FRIDAY-BOOT-TEST-PROBE-BEGIN` anywhere in the
+whole capture this run), but everything, right up until the health-check
+timeout. Root cause: `systemd-journald` had already been actively writing
+to the sealed OS's own `/var/log/journal` since early boot; mounting a
+brand-new btrfs subvolume directly over that live path mid-boot shadows
+its open file out from under it, and journald cannot reopen the new
+location without being told to. This very plausibly explains the
+earlier, separately-chased "`journalctl -u friday-firstboot` comes up
+empty" anomaly too — once journald can't write/reopen its own active
+journal, historical queries can come up empty. **Fixed**: after the
+`@journal` mount succeeds, `wizard.py` now runs `systemctl restart
+systemd-journald.service` so it reopens cleanly against the new,
+persistent location. Also added `restorecon -R <mountpoint>` after every
+successful subvolume mount (SELinux relabeling — new content under an
+existing mountpoint does not inherit the label the policy expects for
+that path; a plausible related class of bug even where mounting itself
+had not visibly failed). Not yet re-verified.
+
 ## M1-M4
 
 Not started. Per rule 4, they don't start until M0's checklist above is
