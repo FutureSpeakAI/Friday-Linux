@@ -534,7 +534,22 @@ def main() -> int:
     # evaluated once per start attempt, not watched continuously. Without
     # an explicit re-trigger here, friday.service would simply never start
     # on this boot even after everything it needs now exists.
-    _run(["systemctl", "start", "friday.service"], check=False)
+    #
+    # REAL BUG, CI run 33400198551: plain `systemctl start friday.service`
+    # blocks synchronously until the unit's own start job completes (active
+    # or failed) — and it hit this script's new 60s `_run()` timeout
+    # (`TIMED OUT after 60.0s`), meaning the actual app (a full Python
+    # server: venv imports, memory database, etc.) takes longer than that
+    # to become ready. That timeout crashed this wizard right here — and
+    # because `.firstboot-done` was already written on the line above,
+    # `main()`'s very first check makes any Restart=on-failure retry return
+    # immediately without ever reissuing this start request. There is no
+    # need to wait synchronously here at all: `--no-block` dispatches the
+    # job and returns immediately, leaving systemd to actually start
+    # friday.service at whatever pace it needs — the real "is it up"
+    # signal is `boot-test.yml`'s own HTTP polling of /api/health from the
+    # host (up to 300s), not this script waiting on the systemd job.
+    _run(["systemctl", "start", "--no-block", "friday.service"], check=False)
 
     # SPEC.md §7.6: "The file is deleted from the ESP after use."
     try:

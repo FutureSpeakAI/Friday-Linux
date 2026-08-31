@@ -739,6 +739,34 @@ kill --signal=SIGUSR1 systemd-journald.service` (fire-and-forget —
 requests the identical flush action with nothing left to hang on). Not
 yet re-verified.
 
+**2026-08-31 — CI run 33400198551: the SIGUSR1 fix worked (no hang there),
+and the new 60s timeout caught the REAL hang for certain: plain
+`systemctl start friday.service` blocks synchronously.** The boot probe
+finally fired this time (at ~134s guest-internal time, later than usual —
+consistent with a 60s stall plus a 5s restart delay). Its captured
+`/var/log/friday-firstboot.log` shows the entire wizard run end to end,
+including the exact new failure: `$ systemctl start friday.service` /
+`TIMED OUT after 60.0s`. `systemctl start` (with no flag) blocks until the
+unit's own job completes (active or failed) — `friday.service` runs a
+full Python app (venv imports, memory database, etc.) that evidently
+takes longer than 60s to become ready, so this script's own new timeout
+fired first. Real, actionable consequence found in the same log:
+`.firstboot-done` was already written one line earlier, so `main()`'s
+very first check (`if FIRSTBOOT_DONE.exists(): return 0`) means the
+`Restart=on-failure` retry this crash triggers will NEVER reissue the
+`systemctl start` call — it just exits successfully immediately. **Fixed
+by not waiting at all**: `systemctl start --no-block friday.service`
+dispatches the job and returns immediately, leaving systemd to actually
+bring the service up at its own pace — the real "is it ready" signal was
+always meant to be `boot-test.yml`'s own HTTP polling of `/api/health`
+from the host (up to 300s), not this wizard synchronously waiting on the
+systemd job. Also confirmed independently good news in this same run:
+`systemctl list-units --failed` → `0 loaded units listed` (nothing
+failed, `friday.service` was simply still starting when the probe ran) —
+and all the now-familiar real confirmations repeated cleanly again:
+`bootc status` one deployment, `/usr` read-only, `/boot/efi` correct, all
+five subvolumes present. Not yet re-verified with the `--no-block` fix.
+
 ## M1-M4
 
 Not started. Per rule 4, they don't start until M0's checklist above is
