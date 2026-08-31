@@ -258,6 +258,19 @@ jobs:
           echo "avc denial count: ${COUNT:-0}"
           [ "${COUNT:-0}" -eq 0 ]
 
+      - name: Make console log readable for artifact upload
+        # REAL BUG, seen in every run so far ("An error has occurred
+        # while creating the zip file for upload" / "EACCES: permission
+        # denied, open '/tmp/console.log'"): QEMU ran under `sudo`
+        # (needed for KVM/loop-device access), so it created
+        # /tmp/console.log as root-owned. This repo's own steps could
+        # always read it (they use `sudo cat`/`sudo grep`), but
+        # actions/upload-artifact runs as the unprivileged runner user
+        # and could not — failing the whole job even on every run where
+        # M0's actual acceptance checks all passed.
+        if: always()
+        run: sudo chmod 644 /tmp/console.log || true
+
       - name: Upload console log as a CI artifact
         if: always()
         uses: actions/upload-artifact@v4
