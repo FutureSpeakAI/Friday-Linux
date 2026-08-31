@@ -104,6 +104,19 @@ blocking this milestone:**
 - `friday-kiosk.service` remains installed but disabled (M1 scope, per
   SPEC.md §15's own milestone split).
 
+**Confirmed a second time, fully green with no exceptions: CI run
+33440729345** (`https://github.com/FutureSpeakAI/Friday-Linux/actions/runs/33440729345`)
+— every single step passed, including the two new automated assertions
+added after the first pass (`bootc status` one-deployment check via
+`jq`, zero `avc: denied` lines) and the artifact upload itself (fixed
+in the same round: `/tmp/console.log` was root-owned because QEMU runs
+under `sudo` for KVM/loop-device access, which made
+`actions/upload-artifact` fail with `EACCES` on every prior run
+regardless of whether M0's actual acceptance checks passed — a `chmod
+644` before upload fixed it). `/api/health responded within 99s`. This
+is the clean, fully-green run to point to going forward; run 33438580570
+above is the first run that proved the underlying facts.
+
 **Superseded (kept, not deleted, per rule 7): every earlier "cannot run
 from this session" / "not yet re-verified" note below this point in the
 file describes real, intermediate states on the way to the pass recorded
