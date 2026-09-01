@@ -1099,6 +1099,32 @@ re-run the boot test, and read the real `journalctl -u friday.service`
 output to find `friday.service`'s actual crash reason — not yet done as
 of this entry.
 
+**2026-09-01 - CI run 33455863895: journald fix confirmed not sufficient
+by itself - the LATE probe (which was supposed to capture
+friday.service's post-crash state) never fired at all, a fourth instance
+of the same "condition checked once, too early, never retried" bug.**
+The early probe's own `journalctl -u friday.service` query (at ~73s)
+correctly showed "-- No entries --" - not a bug, just too early: per the
+coordinator's own report the crash happens around 81s, and the early
+probe fires right when friday.service is dispatched, before it could
+have logged anything either way. The real diagnostic was supposed to
+come from `friday-boot-test-probe-late.timer`, fired at a fixed 200s -
+but it left zero trace anywhere in the console log, even though the
+console itself stayed genuinely alive the whole 300s (FRIDAY-HEARTBEAT
+reached 50). Root cause: `friday-boot-test-probe-late.timer` has
+`ConditionPathExists=.provisioned-unattended` and `WantedBy=timers.target`
+with no ordering dependency on friday-firstboot.service - its first,
+only activation attempt happens early in boot (same as
+friday-boot-test-relay.service and -heartbeat.service before it), when
+the marker does not exist yet, so the timer is never armed and
+`OnBootSec=200s` never starts counting from anything. (The early probe
+was accidentally protected from this same bug the whole time by its own
+`After=friday-firstboot.service` ordering, which defers its first
+attempt until after the marker already exists.) Fixed the same way as
+the other three: `wizard.py` now also explicitly runs `systemctl start
+--no-block friday-boot-test-probe-late.timer`. Not yet re-verified - the
+real crash reason is still unknown as of this entry.
+
 ## M1-M4
 
 Not started. Per rule 4, they don't start until M0's checklist above is

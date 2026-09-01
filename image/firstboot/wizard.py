@@ -543,6 +543,18 @@ def main() -> int:
     # a boot where the app itself came up perfectly healthy.
     _run(["systemctl", "start", "--no-block", "friday-boot-test-relay.service"], check=False)
     _run(["systemctl", "start", "--no-block", "friday-boot-test-heartbeat.service"], check=False)
+    # Same flaw, a fourth time: found while diagnosing the B5 regression
+    # (CI run 33455863895) — friday-boot-test-probe-late.timer ALSO has
+    # ConditionPathExists=.provisioned-unattended and WantedBy=timers.target,
+    # and a systemd *timer* unit's Condition is checked when the TIMER
+    # itself is activated (early in boot, same as any other WantedBy=
+    # unit), not when it fires. If that early activation attempt fails
+    # the condition, the timer is never armed at all — `OnBootSec=200s`
+    # never starts counting down, because the timer never started
+    # counting from anything. Confirmed: zero trace of this timer or its
+    # service anywhere in that run's console log, despite the console
+    # itself staying alive the entire 300s (heartbeat reached 50).
+    _run(["systemctl", "start", "--no-block", "friday-boot-test-probe-late.timer"], check=False)
 
     lockbox_cfg = data.get("lockbox") or {}
     passphrase = lockbox_cfg.get("passphrase")
