@@ -776,6 +776,57 @@ silently made, for each place the spec's text couldn't be used verbatim.
   re-applies the real, shipped tmpfiles.d rule to the freshly-mounted
   directory, the same mechanism that sets this up on any normal boot.
 
+- **CHALLENGE, not resolved unilaterally (B5 regression, real crash reason
+  confirmed via CI run 33479726929's direct diagnostic evidence — commit
+  a2adfd1's `image/scripts/boot-test-probe.sh`): SPEC.md §5's own stated
+  assumption about `FRIDAY_HOME` is factually wrong against Agent-Friday
+  v5.9.0's real `friday_home()` implementation.** SPEC.md line 143 says
+  "`FRIDAY_HOME` is `/home/friday`, so the app's default `~/.friday`
+  layout is unchanged", and line 247's `os.env` template sets
+  `FRIDAY_HOME=/home/friday` accordingly. The real PR-1 source
+  (`agent_friday/paths.py`, checked directly against the `friday-desktop`
+  checkout at tag `v5.9.0`) does not behave that way:
+  ```
+  def friday_home() -> Path:
+      env = os.environ.get("FRIDAY_HOME")
+      if env:
+          return Path(os.path.expanduser(env))       # <- used AS-IS, no ".friday" appended
+      return Path.home() / ".friday"                  # <- ".friday" only added in the fallback
+  ```
+  When `FRIDAY_HOME` is set (which `os.env` deliberately does), the
+  returned path is the override value *itself* — the `.friday` suffix is
+  only appended in the *unset* fallback branch. So with
+  `FRIDAY_HOME=/home/friday`, `cli.py`'s `SETUP_MARKER` resolves to
+  `/home/friday/.setup_complete`, one directory level above where
+  `image/firstboot/wizard.py`'s `seed_app_setup_marker()` actually writes
+  it (`/home/friday/.friday/.setup_complete`, per SPEC.md §8.1's own
+  Amendment-A1 text and this project's existing convention). Confirmed
+  directly, not inferred, via the new probe: `FRIDAY_HOME env = '/home/friday'`,
+  `friday_home() = /home/friday` (no `.friday`), `cli.SETUP_MARKER =
+  /home/friday/.setup_complete exists = False`, while
+  `/home/friday/.friday/.setup_complete` genuinely exists on the real,
+  correctly-mounted `@home` lockbox subvolume (`ls -la` shows it, `cat`
+  shows `friday-linux-os-wizard`, `findmnt /home/friday` shows
+  `/dev/mapper/friday-lockbox[/@home]` mounted `rw` at `/var/home/friday`
+  — the mount-timing/shadowing theory considered before finding this is
+  ruled out). This is why `_is_existing_user()` returns `False` and
+  `cmd_start()` hits `Confirm.ask()` -> `EOFError` under systemd (no tty),
+  crash-looping `friday.service` every `RestartSec=5` — a real regression
+  introduced by B5's v5.7.0 -> v5.9.0 repin (PR-1 landing changed
+  `SETUP_MARKER`'s resolution from a literal `Path.home() / ".friday"`
+  expression to this env-var-aware one; v5.7.0 had no `FRIDAY_HOME`
+  concept at all, so `os.env`'s pre-existing `FRIDAY_HOME=/home/friday`
+  line was inert and harmless until now).
+
+  Not fixed here: doing so means changing either the literal value SPEC.md
+  §5/§13 documents for `FRIDAY_HOME` (to `/home/friday/.friday`, matching
+  `friday_home()`'s real semantics) or removing the line from `os.env`
+  entirely (letting it fall through to `Path.home() / ".friday"`, which
+  resolves identically since `friday`'s `$HOME` is `/home/friday`) —
+  either way, a documented SPEC.md line no longer reads the way SPEC.md
+  wrote it, which is a call for whoever owns SPEC.md, not something to
+  silently patch around in `image/etc/friday/os.env`.
+
 - **Executable bits are set in the Containerfile, not relied on from git.**
   Confirmed via `git ls-files -s` after committing: every file this repo
   tracks landed as mode `100644`, including the `.sh` scripts and the

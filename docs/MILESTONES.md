@@ -1181,6 +1181,47 @@ reliably reaches the console regardless of whatever is wrong with
 journald's stored query path. Not yet re-verified — next dispatch should
 finally show the real Python traceback.
 
+**2026-09-01 - CI run 33469297450: the direct-invocation bypass worked -
+the real traceback appeared for the first time.** `EOFError: EOF when
+reading a line`, from `rich.prompt.Confirm.ask()` inside
+`agent_friday.cli.cmd_start()` at the "Run setup now?" prompt - meaning
+`_is_existing_user()` is returning `False` despite `wizard.py`'s existing
+`seed_app_setup_marker()` writing the marker before `.firstboot-done` is
+even set. Two follow-up commits were needed to get a clean re-test:
+81a9fc3 added direct on-disk/`friday_home()` diagnostics to the probe
+script; a2adfd1 fixed a self-inflicted regression from that same commit
+(the new python inline block's single quotes broke systemd's own
+ExecStart= quote-balance parser - "Unbalanced quoting, ignoring" / "Unit
+configuration has fatal error, unit will not be started" - which silently
+disabled the *entire* probe unit for one full CI round, moved to a real
+script file at `image/scripts/boot-test-probe.sh` to close the bug class
+for good).
+
+**CI run 33479726929 confirmed the real root cause directly, not
+inferred:** `/home/friday/.friday/.setup_complete` genuinely exists
+(content `friday-linux-os-wizard`) on the correctly-mounted `@home`
+lockbox subvolume (`findmnt /home/friday` -> `/dev/mapper/friday-lockbox
+[/@home]` at `/var/home/friday`, `rw`) - ruling out the mount-timing
+theory. But `friday_home() = /home/friday` (no `.friday` suffix), because
+v5.9.0's real `agent_friday/paths.py::friday_home()` returns a *set*
+`FRIDAY_HOME` env var value as-is - the `.friday` suffix is only appended
+in the fallback branch when `FRIDAY_HOME` is unset. `os.env` sets
+`FRIDAY_HOME=/home/friday` per SPEC.md §5/§13's own documented value, so
+`cli.SETUP_MARKER` resolves to `/home/friday/.setup_complete` - one
+directory level above where the marker actually lives. `exists = False`
+confirmed directly via the probe; `_is_existing_user() = False` confirmed
+directly by calling it. Full causal chain now proven with real evidence,
+not guessed, end to end.
+
+**This is a real conflict with a SPEC.md-documented value (line 143/247's
+`FRIDAY_HOME=/home/friday`), which this pass has not changed** - written
+up as a CHALLENGE in `docs/DECISIONS.md` rather than silently patched,
+per this project's standing rule against unilaterally overriding a
+SPEC.md DECIDED item. Reported back to the coordinator with this exact
+finding; the actual code fix (correcting `os.env`'s `FRIDAY_HOME` value,
+or removing the line so `friday_home()` falls through to its
+`Path.home() / ".friday"` default) is pending that sign-off.
+
 ## M1-M4
 
 Not started. Per rule 4, they don't start until M0's checklist above is
