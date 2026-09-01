@@ -1,1 +1,4 @@
 __pycache__/
+
+# Local agent state — contains a bridge token. Never commit.
+.asimovs-mind/
