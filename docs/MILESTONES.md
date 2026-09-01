@@ -1224,6 +1224,32 @@ Decision: correct `image/etc/friday/os.env`'s `FRIDAY_HOME` to
 `/home/friday/.friday`. Recorded as Deviation D-A21 in `docs/DECISIONS.md`
 (not a Challenge), quoting the exact SPEC.md sentence this corrects.
 
+**2026-09-01 — CI run 33485372814: fix verified, full M0 checklist
+re-confirmed end to end, not just the setup prompt bypass.** Image digest
+`sha256:2071b30c0d68e35d889f4e5a318546b2071c943d04df6f2dd617b491b7e284b9`
+(`ghcr.io/futurespeakai/friday-linux:testing`, built from commit
+`a1d8714`):
+
+- `/api/health responded within 99s:` — full genuine JSON body from
+  Agent Friday v5.9.0, `"boot_critical_ok":true`, `"governance":{
+  "decision_bom":"/home/friday/.friday/vault/decision-bom.jsonl"}` (the
+  app is now genuinely reading/writing under `/home/friday/.friday/`, not
+  just bypassing the setup prompt — confirms the fix, not merely its
+  absence of crashing).
+- `bootc status` JSON: `.status.booted != null and .status.staged == null
+  and .status.rollback == null` → `true` (exactly one deployment).
+- `USR_WRITABLE=no (touch: cannot touch
+  '/usr/.friday-boot-test-writeprobe': Read-only file system)`.
+- `avc denial count: 0`.
+- `btrfs subvolume list /friday/lockbox`: all five subvolumes present —
+  `@home` (256), `@models` (257), `@workshop` (258), `@journal` (259),
+  `@snapshots` (260).
+- Boot-test job conclusion: `success`.
+
+M0's full acceptance checklist (SPEC.md §15) is confirmed passing again
+under the v5.9.0 pin, with the B5 regression's real root cause fixed
+(Deviation D-A21) rather than worked around.
+
 ## M1-M4
 
 Not started. Per rule 4, they don't start until M0's checklist above is
