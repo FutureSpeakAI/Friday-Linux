@@ -379,6 +379,7 @@ COPY image/sudoers.d/friday-os-helper          /etc/sudoers.d/friday-os-helper
 COPY image/firstboot/                          /usr/share/friday/firstboot/
 COPY image/splash/                             /usr/share/friday/splash/
 COPY image/scripts/boot-test-relay.py          /usr/libexec/friday/boot-test-relay.py
+COPY image/scripts/boot-test-probe.sh          /usr/libexec/friday/boot-test-probe.sh
 COPY helper/friday-os-helper/                  /usr/libexec/friday/
 
 # friday-kiosk.service is deliberately NOT enabled at M0: the milestone's own
@@ -421,6 +422,7 @@ RUN systemctl enable friday-lockbox.mount friday.service friday-caddy.service \
     && chmod 440 /etc/sudoers.d/friday-os-helper \
     && chmod 0755 /usr/libexec/friday/friday-os-helper \
     && chmod 0755 /usr/libexec/friday/boot-test-relay.py \
+    && chmod 0755 /usr/libexec/friday/boot-test-probe.sh \
     && chmod 0755 /usr/share/friday/firstboot/wizard.py \
     && chmod 0755 /etc/greenboot/check/required.d/*.sh
 # Executable bits above are set explicitly rather than relied on from the
