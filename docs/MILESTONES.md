@@ -1213,14 +1213,16 @@ confirmed directly via the probe; `_is_existing_user() = False` confirmed
 directly by calling it. Full causal chain now proven with real evidence,
 not guessed, end to end.
 
-**This is a real conflict with a SPEC.md-documented value (line 143/247's
-`FRIDAY_HOME=/home/friday`), which this pass has not changed** - written
-up as a CHALLENGE in `docs/DECISIONS.md` rather than silently patched,
-per this project's standing rule against unilaterally overriding a
-SPEC.md DECIDED item. Reported back to the coordinator with this exact
-finding; the actual code fix (correcting `os.env`'s `FRIDAY_HOME` value,
-or removing the line so `friday_home()` falls through to its
-`Path.home() / ".friday"` default) is pending that sign-off.
+**Reported to the coordinator per the stop condition (a SPEC.md-documented
+value, line 143/247's `FRIDAY_HOME=/home/friday`, was involved).** The
+coordinator reviewed SPEC.md §5's own stated intent directly ("the app's
+default `~/.friday` layout is unchanged") and ruled this a SPEC.md §18
+rule 7 case ("do the smallest thing that preserves the intent"), not a
+rule 2 DECIDED-item override: the literal value is a factual error against
+the intent SPEC.md itself states, not a design choice to relitigate.
+Decision: correct `image/etc/friday/os.env`'s `FRIDAY_HOME` to
+`/home/friday/.friday`. Recorded as Deviation D-A21 in `docs/DECISIONS.md`
+(not a Challenge), quoting the exact SPEC.md sentence this corrects.
 
 ## M1-M4
 

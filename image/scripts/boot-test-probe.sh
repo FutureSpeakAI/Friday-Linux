@@ -59,17 +59,14 @@ print('_is_existing_user() =', cli._is_existing_user())
 "
 ) 2>&1 || true
 
-echo "--- direct invocation of the friday binary, bypassing journald entirely ---"
-echo "--- (journalctl has come up completely empty for this whole boot, even unfiltered -- see docs/DECISIONS.md) ---"
-systemctl stop friday.service 2>&1 || true
-(
-  set -a
-  . /etc/friday/os.env
-  if [ -f /var/lib/friday/secrets.env ]; then . /var/lib/friday/secrets.env; fi
-  set +a
-  cd /home/friday && runuser -u friday -- timeout 20 /usr/lib/friday/venv/bin/friday
-) 2>&1 | head -300 || true
-echo "--- end direct invocation ---"
+echo "--- systemctl status friday.service (read-only; not stopping it -- the"
+echo "--- earlier direct-invocation bypass (systemctl stop + run the binary"
+echo "--- manually) served its purpose finding the real EOFError crash and"
+echo "--- FRIDAY_HOME root cause (docs/DECISIONS.md Deviation D-A21) and is"
+echo "--- removed now: stopping friday.service here would make the real"
+echo "--- /api/health check fail for a self-inflicted reason, defeating the"
+echo "--- whole point of re-verifying the fix end to end. ---"
+systemctl status friday.service --no-pager -n 30 2>&1 || true
 
 echo "--- systemctl list-units --failed ---"
 systemctl list-units --failed --no-pager 2>&1 || true
