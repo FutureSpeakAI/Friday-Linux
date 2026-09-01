@@ -45,6 +45,31 @@ ExecStart=/bin/sh -c '\
   journalctl -t wizard.py --no-pager 2>&1; \
   echo "--- journalctl -u friday.service (last 100 lines) ---"; \
   journalctl -u friday.service --no-pager -n 100 2>&1; \
+  echo "--- B5 regression: on-disk state of the app-level setup marker ---"; \
+  ls -la /home/friday/.friday/ 2>&1; \
+  echo "--- marker content ---"; \
+  cat /home/friday/.friday/.setup_complete 2>&1; \
+  echo "--- what cli.py actually sees for FRIDAY_HOME / friday_home() / SETUP_MARKER.exists() ---"; \
+  ( set -a; \
+    . /etc/friday/os.env; \
+    if [ -f /var/lib/friday/secrets.env ]; then . /var/lib/friday/secrets.env; fi; \
+    set +a; \
+    runuser -u friday -- /usr/lib/friday/venv/bin/python3 -c "\
+import os
+from pathlib import Path
+print('FRIDAY_HOME env =', repr(os.environ.get('FRIDAY_HOME')))
+print('Path.home() =', Path.home())
+from agent_friday.paths import friday_home
+fh = friday_home()
+print('friday_home() =', fh)
+marker = fh / '.setup_complete'
+print('marker path =', marker, 'exists =', marker.exists())
+import agent_friday.cli as cli
+print('cli.FRIDAY_DIR =', cli.FRIDAY_DIR)
+print('cli.SETUP_MARKER =', cli.SETUP_MARKER, 'exists =', cli.SETUP_MARKER.exists())
+print('_is_existing_user() =', cli._is_existing_user())
+" \
+  ) 2>&1; \
   echo "--- direct invocation of the friday binary, bypassing journald entirely ---"; \
   echo "--- (journalctl has come up completely empty for this whole boot, even unfiltered -- see docs/DECISIONS.md) ---"; \
   systemctl stop friday.service 2>&1; \

@@ -489,6 +489,22 @@ def seed_app_setup_marker() -> None:
     gid = pwd.getpwnam("friday").pw_gid
     os.chown(friday_dir, uid, gid)
     os.chown(marker, uid, gid)
+    # B5 regression diagnostic (CI run 33450793876): friday.service crashes
+    # with EOFError in Confirm.ask() inside cmd_start(), meaning
+    # _is_existing_user() is returning False despite this function running
+    # (firstboot completed and wrote .firstboot-done, so this function did
+    # not throw). v5.9.0's cli.py now computes SETUP_MARKER from
+    # paths.friday_home() (PR-1), which prefers the FRIDAY_HOME env var —
+    # os.env sets FRIDAY_HOME=/home/friday, matching this hardcoded path —
+    # so on paper this marker should already satisfy the check. Logging the
+    # real on-disk state here, not guessing further.
+    try:
+        st = marker.stat()
+        _log(f"seed_app_setup_marker: wrote/confirmed {marker} "
+             f"(uid={st.st_uid} gid={st.st_gid} mode={oct(st.st_mode)} "
+             f"size={st.st_size})")
+    except OSError as exc:
+        _log(f"seed_app_setup_marker: marker missing/unreadable after write: {exc}")
 
 
 def _diagnose_partition_growth() -> None:
