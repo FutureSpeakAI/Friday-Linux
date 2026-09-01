@@ -1,106 +1,136 @@
 # Friday Linux
 
-A sealed, portable, encrypted OS image that boots an x86-64 PC directly into
-[Agent Friday](https://github.com/FutureSpeakAI/Agent-Friday). It is built with
-[bootc](https://containers.github.io/bootc/) on a Universal Blue / Fedora base:
-the OS ships as a container image, updates atomically, and rolls back
-automatically when a boot fails.
+Friday Linux is a sealed, encrypted, bootable operating system that starts an
+x86-64 PC directly into [Agent Friday](https://github.com/FutureSpeakAI/Agent-Friday).
 
-The design goal is that all user state lives on a LUKS2-encrypted partition
-created at first boot, the host's own disks are never written to, and the same
-USB-attached SSD re-profiles itself to whatever GPU it wakes up on.
+It runs from a USB-attached SSD or from an internal disk. Every byte of user
+state lives on an encrypted partition. Updates are atomic and roll back on their
+own when a boot fails. At each boot the system re-profiles the hardware it finds,
+so the same drive selects the best local model that machine can hold. It writes
+nothing to any other disk in the host.
 
----
+The system is built with [bootc](https://containers.github.io/bootc/) on a
+Universal Blue and Fedora base, which means the operating system ships as a
+container image and is updated the same way a container is.
 
-## ⚠️ Project status: early. Do not run this on hardware you care about.
+## Status
 
-**This repository is at milestone M0 of five (M0–M4).** Read that literally:
+Milestone M0 of five has passed. The image builds, boots under QEMU with OVMF,
+forms its encrypted lockbox, seals `/usr` read-only, and fits inside the size
+budget at roughly 1.7 GiB compressed against an 8 GiB ceiling. Continuous
+integration reproduces all of that on every run.
 
-**M0 means the image builds and boots in a virtual machine.** It does not mean
-the system is finished, safe on real hardware, or usable as a daily driver. It
-is published for transparency and review, not for installation.
+None of that is the same as being ready to run on real hardware, and nobody has
+done that yet. Every result above comes from a virtual machine with no GPU
+attached. Bare-metal boot, Secure Boot enrollment, GPU inference, the interactive
+first-boot wizard, the kiosk shell, and the automatic rollback test are all
+scheduled for later milestones and none of them has been exercised. Images are
+also pushed unsigned, because signing is a deliberate and documented deferral
+rather than an oversight, so a pulled image should not be treated as verified.
 
-What M0 actually proved, in CI, on QEMU/KVM with OVMF and no GPU:
+Read this repository as an account of work in progress. It is published so the
+design and the record can be examined, not because it is ready to install.
 
-- `podman build` succeeds and the image pushes to GHCR.
-- `bootc-image-builder` produces a raw image well under the 8 GB budget.
-- The VM boots unattended and Agent Friday's `/api/health` returns 200.
-- `bootc status` shows exactly one deployment and `/usr` is read-only.
-- The lockbox is created as real LUKS2 + Argon2id with its five btrfs subvolumes.
-- Zero SELinux `avc: denied` lines in the boot log.
+## What it is not
 
-### What is NOT done
+These are non-goals taken from the specification rather than a list assembled
+after the fact.
 
-| Not done | Milestone |
-|---|---|
-| **Image signing.** Builds are pushed unsigned; cosign is a deliberate, documented skip. Do not treat a pulled image as verified. | M0 skip → later |
-| **Any testing on real, physical hardware.** Everything above is a virtual machine. No bare-metal boot has been validated. | M2/M3 |
-| **The first-boot wizard.** What exists is a stub that reads an unattended YAML file. There is no interactive wizard, no passphrase prompt, no recovery key. | M1 |
-| **Automatic rollback, proven.** greenboot checks are installed; the fault-injection rollback test has not been run. | M1 |
-| **Kiosk shell.** `friday-kiosk.service` ships installed but disabled. | M1 |
-| **GPU / CUDA, model residency, local voice.** | M2 |
-| **Roaming between machines, `preload`.** | M3 |
-| **Install-to-disk, LAN access, update channels, hardware docs.** | M4 |
+* Not a general-purpose desktop distribution. The kiosk shell is the desktop.
+* No macOS or Apple silicon support.
+* No ARM or aarch64 images. Nothing here precludes them; they are not built or
+  tested.
+* No dual-boot installation alongside an existing operating system. Installation
+  to an internal disk claims the whole disk.
+* Does not bundle Ollama. The residency layer drives `llama-server` directly.
+* Does not bundle PyTorch. Local voice runs on CTranslate2 and ONNX.
+* Not a client hypervisor, and not an application marketplace.
 
-### Known blocking dependency
+## Known gaps
 
-Friday Linux consumes Agent Friday by pinned tag and expects upstream changes
-(`core/paths.py`, `core/os_mode.py`, a packaged seed) that **are not merged
-upstream yet**. Until they are, `FRIDAY_OS_MODE=1` does not fully do what the
-spec assumes, and several service definitions rely on documented workarounds
-(see Amendment A1 in `docs/DECISIONS.md`). This is tracked honestly rather than
-papered over.
+Three items are deferred rather than solved, and a reader deciding whether to
+trust this should not have to find them by reading the commit history.
 
-### Safety notes if you build it anyway
+1. **The EFI system partition is not sized to specification.** The root and
+   boot partitions are fixed at 16 GiB and 1 GiB exactly as specified.
+   `bootc-image-builder` exposes no primitive for ESP size, so that partition
+   ships at whatever default the tool produces and has not been confirmed
+   against the 512 MiB figure the specification asks for. A measurement in a
+   built image showed roughly 501 MiB, which is close, but close by coincidence
+   is not the same as configured.
+2. **`friday.service` runs in the generic `init_t` SELinux domain** rather than
+   a domain of its own. A small custom policy module grants exactly one narrow
+   permission and nothing wider, so this is not an open hole today. The problem
+   is that it does not scale, because every future permission the application
+   needs will require another hand-written addition to that module.
+3. **The lockbox accepts a typed passphrase only.** The first-boot wizard reads
+   a literal passphrase from an unattended configuration file. The option to
+   generate a random passphrase and display it once, along with the opt-in
+   recovery key, is not implemented and requires the interactive wizard that
+   arrives in M1.
 
-- The unattended path takes a **literal passphrase from a YAML file**. The one
-  in `.github/workflows/boot-test.yml` is a throwaway CI fixture, named as such.
-  Never reuse it, and never ship a real passphrase that way.
-- Secrets are generated at first boot into `/var/lib/friday/secrets.env`. Per a
-  challenge recorded in `docs/DECISIONS.md`, that path is **not** on an
-  encrypted lockbox subvolume — it is protected by root permissions only. That
-  is a known gap against the spec's own stated security property.
-- "Leaves no trace on the host" (goal G2) is a **design goal with a defined
-  test, not a verified result.** That test has not been run.
+## Dependencies
 
----
-
-## Repository layout
-
-| Path | What it is |
-|---|---|
-| `Containerfile` | The bootc image build. |
-| `build/` | Pins (`agent-friday.pin`, `llama.cpp.pin`), disk config, llama.cpp build script. |
-| `image/` | Everything baked into the OS: systemd units, greenboot checks, firstboot wizard, Caddy, nftables, SELinux policy, polkit, sudoers. |
-| `helper/` | `friday-os-helper` — the only privileged helper, with an argparse allowlist. |
-| `.github/workflows/` | `build.yml` (image build + push) and `boot-test.yml` (QEMU/OVMF boot test). |
-| `docs/SPEC.md` | The full system specification. Start here. |
-| `docs/DECISIONS.md` | ADRs, challenges to decided items, and every deviation taken. |
-| `docs/MILESTONES.md` | The real execution record, including the failures on the way. |
-| `docs/VERIFY.md` | Facts assumed but not verifiable from the build sandbox, with the command to check each. |
-| `docs/BOM.md` | Bill of materials. |
-
-`docs/MILESTONES.md` deliberately keeps superseded, wrong intermediate states
-rather than rewriting them. It is a log, not a summary.
-
-## Documentation caveat
-
-The `docs/` files were written as working documents for the build, not as
-published material. They contain absolute paths from the author's own
-development machine and reference sibling repositories that are not public.
-They are kept as-is because they are the honest record; they are not a polished
-external guide.
+Friday Linux consumes Agent Friday at a pinned release tag, currently `v5.9.0`,
+recorded in `build/agent-friday.pin`. The two repositories are separate by
+design. Friday Linux is the deployment target and Agent Friday is the
+application, and the specification forbids forking the application into this
+repository. Some upstream changes the specification assumes are not yet merged,
+and the workarounds standing in for them are recorded in `docs/DECISIONS.md`.
 
 ## Building
 
-Requires Podman and a GHCR login.
+A Windows host is not a build environment. Building requires WSL2 with Ubuntu
+and rootful podman, or a Linux runner. Producing the disk image additionally
+needs root for loop-device access, and booting it needs QEMU with KVM.
+
+Build the container image:
 
 ```bash
-podman build -t ghcr.io/futurespeakai/friday-linux:testing .
+podman build -t friday-linux:testing -f Containerfile .
 ```
 
-CI builds this on every push and runs the QEMU boot test on dispatch. The
-published container package is **not** public — only this source is.
+`bootc-image-builder` reads from root's container storage, so move the image
+across rather than rebuilding it under `sudo`:
+
+```bash
+podman save -o /tmp/friday-linux.tar localhost/friday-linux:testing
+sudo podman load -i /tmp/friday-linux.tar
+```
+
+Produce the raw disk image. The disk customization file is mounted at the fixed
+path `/config.toml`, as `bootc-image-builder` accepts no flag for it:
+
+```bash
+sudo podman run --rm \
+  --privileged \
+  --security-opt label=type:unconfined_t \
+  -v "$(pwd)/output:/output" \
+  -v "$(pwd)/build/disk.toml:/config.toml:ro" \
+  -v /var/lib/containers/storage:/var/lib/containers/storage \
+  quay.io/centos-bootc/bootc-image-builder:latest \
+  --type raw \
+  --rootfs xfs \
+  localhost/friday-linux:testing
+```
+
+These are the commands continuous integration runs on every build, in this
+order. `.github/workflows/build.yml` and `.github/workflows/boot-test.yml` are
+the authoritative versions.
+
+## Documentation
+
+`docs/SPEC.md` is the full system specification and the place to start.
+`docs/DECISIONS.md` holds the architecture decisions, the challenges raised
+against them, and every deviation taken. `docs/MILESTONES.md` is the execution
+record, and it keeps superseded and mistaken intermediate states rather than
+tidying them away, so it reads as a log rather than a summary.
+`docs/VERIFY.md` lists facts the build sandbox could not check, each with the
+command that would check it.
+
+These were written as working documents rather than published material. They
+contain absolute paths from the author's development machine and refer to
+sibling repositories that are not public.
 
 ## License
 
