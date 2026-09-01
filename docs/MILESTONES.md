@@ -1125,6 +1125,36 @@ the other three: `wizard.py` now also explicitly runs `systemctl start
 --no-block friday-boot-test-probe-late.timer`. Not yet re-verified - the
 real crash reason is still unknown as of this entry.
 
+**2026-09-01 - CI run 33460209488: the late probe fired for real (200s,
+exactly on schedule) and confirmed the coordinator's crash-loop theory,
+but journalctl -u friday.service is STILL empty even with the tmpfiles
+fix - and reading systemd's real source shows why that fix, while
+legitimate, was not the actual reason.** Real data from `systemctl
+status friday.service`: `Active: activating (auto-restart) ... Process:
+1855 ExecStart=/usr/lib/friday/venv/bin/friday (code=exited,
+status=1/FAILURE)` - the Python process genuinely starts, then exits
+with code 1, repeatedly (Restart=on-failure). The relay fix from the
+prior round is confirmed working too: `ss -tlnp` shows `0.0.0.0:3001`
+genuinely listening (python3 pid=1659); `curl 127.0.0.1:3000` fails only
+because nothing is listening on 3000 - friday.service itself never gets
+that far.
+
+Fetched systemd's own real source (`src/journal/journald-manager.c`,
+`manager_find_journal()`) to understand "Failed to open user journal
+file" precisely, rather than assume the tmpfiles fix was sufficient: this
+fallback is **not** message loss - when a non-system UID's per-user
+journal can't be opened, journald logs this warning and falls back to
+**the system journal**, which `journalctl -u` reads from normally. This
+spam (1153 occurrences this run - the tmpfiles fix did not stop it
+either, a separate open question) is noisy but not why `friday.service`'s
+entries are missing. The real cause of the empty `-u friday.service`
+query is still unknown. Added broader diagnostics to the late probe
+(`journalctl _SYSTEMD_INVOCATION_ID=...` using the exact invocation ID
+from `systemctl status`, `journalctl _COMM=friday` unfiltered by unit,
+and a raw `journalctl -b -n 60`) to determine whether entries exist
+anywhere in the journal under a different key, or genuinely do not exist
+at all. Not yet re-verified.
+
 ## M1-M4
 
 Not started. Per rule 4, they don't start until M0's checklist above is

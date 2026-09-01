@@ -20,6 +20,14 @@ ExecStart=/bin/sh -c '\
   systemctl status friday.service --no-pager -l 2>&1; \
   echo "--- journalctl -u friday.service (full) ---"; \
   journalctl -u friday.service --no-pager 2>&1; \
+  echo "--- journalctl _SYSTEMD_INVOCATION_ID (from systemctl status Invocation:) ---"; \
+  INVID=$(systemctl show -p InvocationID --value friday.service); \
+  echo "invocation id: ${INVID}"; \
+  journalctl _SYSTEMD_INVOCATION_ID="${INVID}" --no-pager 2>&1; \
+  echo "--- journalctl _COMM=friday (unfiltered by unit) ---"; \
+  journalctl _COMM=friday --no-pager 2>&1; \
+  echo "--- journalctl -b, last 60 lines unfiltered ---"; \
+  journalctl -b --no-pager -n 60 2>&1; \
   echo "--- ss -tlnp (listening ports) ---"; \
   ss -tlnp 2>&1; \
   echo "--- curl 127.0.0.1:3000/api/health ---"; \
