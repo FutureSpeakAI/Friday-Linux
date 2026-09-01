@@ -1155,6 +1155,32 @@ and a raw `journalctl -b -n 60`) to determine whether entries exist
 anywhere in the journal under a different key, or genuinely do not exist
 at all. Not yet re-verified.
 
+**2026-09-01 - CI run 33464768182: the broader diagnostics landed a
+definitive, much bigger finding - `journalctl -b` (completely unfiltered,
+the WHOLE current boot) came back "-- No entries --" too.** Not just
+`-u friday.service`, not just `_COMM=friday` - the entire queryable
+journal for this boot is empty from journalctl's point of view, despite
+overwhelming console evidence of real activity (mounts, wizard steps,
+mkfs.btrfs output, all the earlier probe runs' own successful queries).
+This rules out unit-filtering or per-UID routing as the cause entirely -
+journald's actual stored/queryable database is broken far more
+fundamentally than Deviation D-A19/D-A20 addressed, while its
+console-forwarding path (which does not depend on the same on-disk
+store) keeps working fine - explaining why every one of this project's
+own probe/heartbeat/relay units, whose output all goes through
+`journal+console`, has kept working throughout.
+
+**Decision: stop chasing journald's query path for this diagnosis and
+bypass it entirely.** Added a direct reproduction to the early boot
+probe: stop `friday.service`, then invoke
+`/usr/lib/friday/venv/bin/friday` directly as the `friday` user with the
+same environment (`/etc/friday/os.env` + `/var/lib/friday/secrets.env`,
+sourced the same way `EnvironmentFile=` would apply them), piping its
+own stdout/stderr straight through this probe's own shell — which
+reliably reaches the console regardless of whatever is wrong with
+journald's stored query path. Not yet re-verified — next dispatch should
+finally show the real Python traceback.
+
 ## M1-M4
 
 Not started. Per rule 4, they don't start until M0's checklist above is

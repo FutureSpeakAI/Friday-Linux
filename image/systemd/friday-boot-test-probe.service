@@ -10,6 +10,18 @@
 # friday-boot-test-relay.service, gated the same way (see that unit's
 # header) so it is a silent no-op on every real deployment.
 #
+# 2026-09-01 addition: `journalctl -b` came back completely empty for the
+# ENTIRE current boot (not just this unit — confirmed with an unfiltered
+# `journalctl -b -n 60`) while diagnosing a real friday.service crash-loop
+# regression, despite obvious console evidence that a huge amount of real
+# activity had occurred. journald's own queryable store is broken far more
+# deeply than the already-known per-user-journal permission issue.
+# Bypassing it entirely for this one diagnosis: stop friday.service and
+# invoke the same binary directly as the friday user with the same
+# environment, piping its own stdout/stderr straight through this
+# script's own shell (which reliably reaches the console, unlike anything
+# routed through journald's apparently-broken storage).
+#
 # StandardOutput=journal+console is scoped to just this one-shot unit, not
 # to friday.service or friday-firstboot.service — neither of those needed
 # to change to make this observable.
@@ -33,6 +45,16 @@ ExecStart=/bin/sh -c '\
   journalctl -t wizard.py --no-pager 2>&1; \
   echo "--- journalctl -u friday.service (last 100 lines) ---"; \
   journalctl -u friday.service --no-pager -n 100 2>&1; \
+  echo "--- direct invocation of the friday binary, bypassing journald entirely ---"; \
+  echo "--- (journalctl has come up completely empty for this whole boot, even unfiltered -- see docs/DECISIONS.md) ---"; \
+  systemctl stop friday.service 2>&1; \
+  ( set -a; \
+    . /etc/friday/os.env; \
+    if [ -f /var/lib/friday/secrets.env ]; then . /var/lib/friday/secrets.env; fi; \
+    set +a; \
+    cd /home/friday && runuser -u friday -- timeout 20 /usr/lib/friday/venv/bin/friday \
+  ) 2>&1 | head -300; \
+  echo "--- end direct invocation ---"; \
   echo "--- systemctl list-units --failed ---"; \
   systemctl list-units --failed --no-pager 2>&1; \
   echo "--- bootc status ---"; \
